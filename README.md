@@ -8,6 +8,7 @@ with gcc 4.9.3 shipped with R.
 
 arrow cmake invocation was
 
+```shell
 cmake -G"MSYS Makefiles" .. \
   -DARROW_BUILD_TESTS=FALSE \
   -DARROW_WITH_SNAPPY=FALSE \
@@ -19,4 +20,4 @@ cmake -G"MSYS Makefiles" .. \
   -DARROW_BOOST_USE_SHARED=FALSE \
   -DARROW_WITH_ZLIB=FALSE \
   -DARROW_WITH_BROTLI=FALSE
-
+```
