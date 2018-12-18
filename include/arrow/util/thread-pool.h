@@ -18,15 +18,16 @@
 #ifndef ARROW_UTIL_THREAD_POOL_H
 #define ARROW_UTIL_THREAD_POOL_H
 
-#include <condition_variable>
-#include <deque>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 #include <exception>
 #include <functional>
 #include <future>
+#include <iostream>
 #include <list>
 #include <memory>
-#include <mutex>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -36,13 +37,21 @@
 
 namespace arrow {
 
-// Get the number of worker threads used by the process-global thread pool
-// for CPU-bound tasks.  This is an idealized number, the actual number
-// may lag a bit.
+/// \brief Get the capacity of the global thread pool
+///
+/// Return the number of worker threads in the thread pool to which
+/// Arrow dispatches various CPU-bound tasks.  This is an ideal number,
+/// not necessarily the exact number of threads at a given point in time.
+///
+/// You can change this number using SetCpuThreadPoolCapacity().
 ARROW_EXPORT int GetCpuThreadPoolCapacity();
 
-// Set the number of worker threads used by the process-global thread pool
-// for CPU-bound tasks.
+/// \brief Set the capacity of the global thread pool
+///
+/// Set the number of worker threads int the thread pool to which
+/// Arrow dispatches various CPU-bound tasks.
+///
+/// The current number is returned by GetCpuThreadPoolCapacity().
 ARROW_EXPORT Status SetCpuThreadPoolCapacity(int threads);
 
 namespace internal {
@@ -117,7 +126,8 @@ class ARROW_EXPORT ThreadPool {
     Status st = SpawnReal(detail::packaged_task_wrapper<Result>(std::move(task)));
     if (!st.ok()) {
       // This happens when Submit() is called after Shutdown()
-      throw std::runtime_error(st.ToString());
+      std::cerr << st.ToString() << std::endl;
+      std::abort();
     }
     return fut;
   }
@@ -140,6 +150,8 @@ class ARROW_EXPORT ThreadPool {
   void LaunchWorkersUnlocked(int threads);
   // Get the current actual capacity
   int GetActualCapacity();
+  // Reinitialize the thread pool if the pid changed
+  void ProtectAgainstFork();
 
   // The worker loop is a static method so that it can keep running
   // after the ThreadPool is destroyed
@@ -148,9 +160,12 @@ class ARROW_EXPORT ThreadPool {
 
   static std::shared_ptr<ThreadPool> MakeCpuThreadPool();
 
-  const std::shared_ptr<State> sp_state_;
-  State* const state_;
+  std::shared_ptr<State> sp_state_;
+  State* state_;
   bool shutdown_on_destroy_;
+#ifndef _WIN32
+  pid_t pid_;
+#endif
 };
 
 // Return the process-global thread pool for CPU-bound tasks.

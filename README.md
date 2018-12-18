@@ -1,23 +1,23 @@
-[Apache arrow](https://github.com/apache/arrow) built with the gcc 4.9.6 toolchain
+# Apache Arrow
 
-Statically linked to a boost dependency compiled with msys2-mingw gcc 7.3.0
-toolchain with -D_GLIBCXX_USE_CXX11_ABI=0 defined to provide ABI compatibility
-with gcc 4.9.3 shipped with R.
+A backport of libarrow for Rtools 3.5. This was built using the automated 
+rtools40 build system while targeting the old gcc-4.9.3 compilers. 
+See [PKGBUILD](PKGBUILD) for details. It was built with:
 
-[arrow.patch](arrow.patch) provides changes needed to compile arrow 0.9.0_1 with this toolchain.
+ - arrow 0.11.1
+ - boost 1.67.0
 
-arrow cmake invocation was
+To rebuild this, install both rtools35 and rtools40. Then open the rtools40
+shell, navigate to this directory, and run: `makepkg-mingw`.
 
-```shell
-cmake -G"MSYS Makefiles" .. \
-  -DARROW_BUILD_TESTS=FALSE \
-  -DARROW_WITH_SNAPPY=FALSE \
-  -DARROW_WITH_ZSTD=FALSE \
-  -DARROW_WITH_LZ4=FALSE \
-  -DARROW_JEMALLOC=FALSE \
-  -DARROW_BUILD_STATIC=TRUE \
-  -DARROW_BOOST_VENDORED=FALSE \
-  -DARROW_BOOST_USE_SHARED=FALSE \
-  -DARROW_WITH_ZLIB=FALSE \
-  -DARROW_WITH_BROTLI=FALSE
+Alternatively send a PR to the `backports` branch in the [rtools-packages](https://github.com/r-windows/rtools-packages/tree/backports) repo.
+
+## How to link
+
+The R package `Makevars.win` should contain `-DARROW_STATIC` to static link:
+
+```make
+CXX_STD=CXX11
+PKG_CPPFLAGS=-I../windows/arrow-1.11.1/include -DARROW_STATIC
+PKG_LIBS=-L../windows/arrow-1.11.1/lib${R_ARCH} -larrow
 ```
