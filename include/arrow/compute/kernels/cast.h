@@ -23,27 +23,29 @@
 #include "arrow/status.h"
 #include "arrow/util/visibility.h"
 
-#include "arrow/compute/kernel.h"
-
 namespace arrow {
 
 class Array;
-class ChunkedArray;
-class Column;
 class DataType;
 
 namespace compute {
+
+struct Datum;
+class FunctionContext;
+class UnaryKernel;
 
 struct ARROW_EXPORT CastOptions {
   CastOptions()
       : allow_int_overflow(false),
         allow_time_truncate(false),
-        allow_float_truncate(false) {}
+        allow_float_truncate(false),
+        allow_invalid_utf8(false) {}
 
   explicit CastOptions(bool safe)
       : allow_int_overflow(!safe),
         allow_time_truncate(!safe),
-        allow_float_truncate(!safe) {}
+        allow_float_truncate(!safe),
+        allow_invalid_utf8(!safe) {}
 
   static CastOptions Safe() { return CastOptions(true); }
 
@@ -52,12 +54,15 @@ struct ARROW_EXPORT CastOptions {
   bool allow_int_overflow;
   bool allow_time_truncate;
   bool allow_float_truncate;
+  // Indicate if conversions from Binary/FixedSizeBinary to string must
+  // validate the utf8 payload.
+  bool allow_invalid_utf8;
 };
 
 /// \since 0.7.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status GetCastFunction(const DataType& in_type, const std::shared_ptr<DataType>& to_type,
+Status GetCastFunction(const DataType& in_type, std::shared_ptr<DataType> to_type,
                        const CastOptions& options, std::unique_ptr<UnaryKernel>* kernel);
 
 /// \brief Cast from one array type to another
@@ -71,7 +76,7 @@ Status GetCastFunction(const DataType& in_type, const std::shared_ptr<DataType>&
 /// \note API not yet finalized
 ARROW_EXPORT
 Status Cast(FunctionContext* context, const Array& value,
-            const std::shared_ptr<DataType>& to_type, const CastOptions& options,
+            std::shared_ptr<DataType> to_type, const CastOptions& options,
             std::shared_ptr<Array>* out);
 
 /// \brief Cast from one value to another
@@ -85,8 +90,7 @@ Status Cast(FunctionContext* context, const Array& value,
 /// \note API not yet finalized
 ARROW_EXPORT
 Status Cast(FunctionContext* context, const Datum& value,
-            const std::shared_ptr<DataType>& to_type, const CastOptions& options,
-            Datum* out);
+            std::shared_ptr<DataType> to_type, const CastOptions& options, Datum* out);
 
 }  // namespace compute
 }  // namespace arrow

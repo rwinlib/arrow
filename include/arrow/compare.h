@@ -28,13 +28,17 @@ namespace arrow {
 
 class Array;
 class DataType;
-class Status;
 class Tensor;
+class SparseTensor;
+struct Scalar;
 
 /// Returns true if the arrays are exactly equal
 bool ARROW_EXPORT ArrayEquals(const Array& left, const Array& right);
 
 bool ARROW_EXPORT TensorEquals(const Tensor& left, const Tensor& right);
+
+/// EXPERIMENTAL: Returns true if the given sparse tensors are exactly equal
+bool ARROW_EXPORT SparseTensorEquals(const SparseTensor& left, const SparseTensor& right);
 
 /// Returns true if the arrays are approximately equal. For non-floating point
 /// types, this is equivalent to ArrayEquals(left, right)
@@ -46,7 +50,17 @@ bool ARROW_EXPORT ArrayRangeEquals(const Array& left, const Array& right,
                                    int64_t other_start_idx);
 
 /// Returns true if the type metadata are exactly equal
-bool ARROW_EXPORT TypeEquals(const DataType& left, const DataType& right);
+/// \param[in] left a DataType
+/// \param[in] right a DataType
+/// \param[in] check_metadata whether to compare KeyValueMetadata for child
+/// fields
+bool ARROW_EXPORT TypeEquals(const DataType& left, const DataType& right,
+                             bool check_metadata = true);
+
+/// Returns true if scalars are equal
+/// \param[in] left a Scalar
+/// \param[in] right a Scalar
+bool ARROW_EXPORT ScalarEquals(const Scalar& left, const Scalar& right);
 
 }  // namespace arrow
 

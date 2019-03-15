@@ -23,24 +23,29 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
 #include "arrow/status.h"
 #include "arrow/type_fwd.h"  // IWYU pragma: export
 #include "arrow/util/checked_cast.h"
-#include "arrow/util/key_value_metadata.h"
+#include "arrow/util/key_value_metadata.h"  // IWYU pragma: export
 #include "arrow/util/macros.h"
 #include "arrow/util/visibility.h"
-#include "arrow/visitor.h"
+#include "arrow/visitor.h"  // IWYU pragma: keep
 
 namespace arrow {
 
-/// \brief Main data type enumeration
-///
-/// This enumeration provides a quick way to interrogate the category
-/// of a DataType instance.
+class Array;
+class Field;
+class MemoryPool;
+
 struct Type {
+  /// \brief Main data type enumeration
+  ///
+  /// This enumeration provides a quick way to interrogate the category
+  /// of a DataType instance.
   enum type {
     /// A NULL type having no physical storage
     NA,
@@ -128,7 +133,10 @@ struct Type {
     DICTIONARY,
 
     /// Map, a repeated struct logical type
-    MAP
+    MAP,
+
+    /// Custom data type, implemented by user
+    EXTENSION
   };
 };
 
@@ -139,18 +147,20 @@ struct Type {
 /// nested type consisting of other data types, or another data type (e.g. a
 /// timestamp encoded as an int64).
 ///
-/// Simple datatypes may be entirely described by their Type id, but
+/// Simple datatypes may be entirely described by their Type::type id, but
 /// complex datatypes are usually parametric.
 class ARROW_EXPORT DataType {
  public:
   explicit DataType(Type::type id) : id_(id) {}
   virtual ~DataType();
 
-  // Return whether the types are equal
-  //
-  // Types that are logically convertible from one to another (e.g. List<UInt8>
-  // and Binary) are NOT equal.
-  virtual bool Equals(const DataType& other) const;
+  /// \brief Return whether the types are equal
+  ///
+  /// Types that are logically convertible from one to another (e.g. List<UInt8>
+  /// and Binary) are NOT equal.
+  bool Equals(const DataType& other, bool check_metadata = true) const;
+
+  /// \brief Return whether the types are equal
   bool Equals(const std::shared_ptr<DataType>& other) const;
 
   std::shared_ptr<Field> child(int i) const { return children_[i]; }
@@ -159,7 +169,7 @@ class ARROW_EXPORT DataType {
 
   int num_children() const { return static_cast<int>(children_.size()); }
 
-  virtual Status Accept(TypeVisitor* visitor) const = 0;
+  Status Accept(TypeVisitor* visitor) const;
 
   /// \brief A string representation of the type, including any children
   virtual std::string ToString() const = 0;
@@ -170,6 +180,7 @@ class ARROW_EXPORT DataType {
   /// \since 0.7.0
   virtual std::string name() const = 0;
 
+  /// \brief Return the type category
   Type::type id() const { return id_; }
 
  protected:
@@ -244,23 +255,34 @@ class ARROW_EXPORT Field {
         const std::shared_ptr<const KeyValueMetadata>& metadata = NULLPTR)
       : name_(name), type_(type), nullable_(nullable), metadata_(metadata) {}
 
+  /// \brief Return the field's attached metadata
   std::shared_ptr<const KeyValueMetadata> metadata() const { return metadata_; }
 
+  /// \brief Return whether the field has non-empty metadata
   bool HasMetadata() const;
 
+  /// \brief Return a copy of this field with the given metadata attached to it
   std::shared_ptr<Field> AddMetadata(
       const std::shared_ptr<const KeyValueMetadata>& metadata) const;
+  /// \brief Return a copy of this field without any metadata attached to it
   std::shared_ptr<Field> RemoveMetadata() const;
+
+  /// \brief Return a copy of this field with the replaced type.
+  std::shared_ptr<Field> WithType(const std::shared_ptr<DataType>& type) const;
 
   std::vector<std::shared_ptr<Field>> Flatten() const;
 
-  bool Equals(const Field& other) const;
-  bool Equals(const std::shared_ptr<Field>& other) const;
+  bool Equals(const Field& other, bool check_metadata = true) const;
+  bool Equals(const std::shared_ptr<Field>& other, bool check_metadata = true) const;
 
+  /// \brief Return a string representation ot the field
   std::string ToString() const;
 
+  /// \brief Return the field name
   const std::string& name() const { return name_; }
+  /// \brief Return the field data type
   std::shared_ptr<DataType> type() const { return type_; }
+  /// \brief Return whether the field is nullable
   bool nullable() const { return nullable_; }
 
  private:
@@ -289,10 +311,6 @@ class ARROW_EXPORT CTypeImpl : public BASE {
 
   int bit_width() const override { return static_cast<int>(sizeof(C_TYPE) * CHAR_BIT); }
 
-  Status Accept(TypeVisitor* visitor) const override {
-    return visitor->Visit(internal::checked_cast<const DERIVED&>(*this));
-  }
-
   std::string ToString() const override { return this->name(); }
 };
 
@@ -310,7 +328,6 @@ class ARROW_EXPORT NullType : public DataType, public NoExtraMeta {
 
   NullType() : DataType(Type::NA) {}
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
 
   std::string name() const override { return "null"; }
@@ -323,7 +340,6 @@ class ARROW_EXPORT BooleanType : public FixedWidthType, public NoExtraMeta {
 
   BooleanType() : FixedWidthType(Type::BOOL) {}
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
 
   int bit_width() const override { return 1; }
@@ -431,7 +447,6 @@ class ARROW_EXPORT ListType : public NestedType {
 
   std::shared_ptr<DataType> value_type() const { return children_[0]->type(); }
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
 
   std::string name() const override { return "list"; }
@@ -444,7 +459,6 @@ class ARROW_EXPORT BinaryType : public DataType, public NoExtraMeta {
 
   BinaryType() : BinaryType(Type::BINARY) {}
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
   std::string name() const override { return "binary"; }
 
@@ -463,7 +477,6 @@ class ARROW_EXPORT FixedSizeBinaryType : public FixedWidthType, public Parametri
   explicit FixedSizeBinaryType(int32_t byte_width, Type::type override_type_id)
       : FixedWidthType(override_type_id), byte_width_(byte_width) {}
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
   std::string name() const override { return "fixed_size_binary"; }
 
@@ -481,7 +494,6 @@ class ARROW_EXPORT StringType : public BinaryType {
 
   StringType() : BinaryType(Type::STRING) {}
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
   std::string name() const override { return "utf8"; }
 };
@@ -491,24 +503,32 @@ class ARROW_EXPORT StructType : public NestedType {
  public:
   static constexpr Type::type type_id = Type::STRUCT;
 
-  explicit StructType(const std::vector<std::shared_ptr<Field>>& fields)
-      : NestedType(Type::STRUCT) {
-    children_ = fields;
-  }
+  explicit StructType(const std::vector<std::shared_ptr<Field>>& fields);
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
   std::string name() const override { return "struct"; }
 
   /// Returns null if name not found
+  std::shared_ptr<Field> GetFieldByName(const std::string& name) const;
+
+  /// Return all fields having this name
+  std::vector<std::shared_ptr<Field>> GetAllFieldsByName(const std::string& name) const;
+
+  /// Returns -1 if name not found or if there are multiple fields having the
+  /// same name
+  int GetFieldIndex(const std::string& name) const;
+
+  /// Return the indices of all fields having this name
+  std::vector<int> GetAllFieldIndices(const std::string& name) const;
+
+  ARROW_DEPRECATED("Use GetFieldByName")
   std::shared_ptr<Field> GetChildByName(const std::string& name) const;
 
-  /// Returns -1 if name not found
+  ARROW_DEPRECATED("Use GetFieldIndex")
   int GetChildIndex(const std::string& name) const;
 
  private:
-  /// Lazily initialized mapping
-  mutable std::unordered_map<std::string, int> name_to_index_;
+  std::unordered_multimap<std::string, int> name_to_index_;
 };
 
 /// \brief Base type class for (fixed-size) decimal data
@@ -532,10 +552,8 @@ class ARROW_EXPORT Decimal128Type : public DecimalType {
  public:
   static constexpr Type::type type_id = Type::DECIMAL;
 
-  explicit Decimal128Type(int32_t precision, int32_t scale)
-      : DecimalType(16, precision, scale) {}
+  explicit Decimal128Type(int32_t precision, int32_t scale);
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
   std::string name() const override { return "decimal"; }
 };
@@ -555,7 +573,6 @@ class ARROW_EXPORT UnionType : public NestedType {
 
   std::string ToString() const override;
   std::string name() const override { return "union"; }
-  Status Accept(TypeVisitor* visitor) const override;
 
   const std::vector<uint8_t>& type_codes() const { return type_codes_; }
 
@@ -578,17 +595,17 @@ enum class DateUnit : char { DAY = 0, MILLI = 1 };
 /// \brief Base type class for date data
 class ARROW_EXPORT DateType : public FixedWidthType {
  public:
-  DateUnit unit() const { return unit_; }
+  virtual DateUnit unit() const = 0;
 
  protected:
-  DateType(Type::type type_id, DateUnit unit);
-  DateUnit unit_;
+  explicit DateType(Type::type type_id);
 };
 
 /// Concrete type class for 32-bit date data (as number of days since UNIX epoch)
 class ARROW_EXPORT Date32Type : public DateType {
  public:
   static constexpr Type::type type_id = Type::DATE32;
+  static constexpr DateUnit UNIT = DateUnit::DAY;
 
   using c_type = int32_t;
 
@@ -596,16 +613,17 @@ class ARROW_EXPORT Date32Type : public DateType {
 
   int bit_width() const override { return static_cast<int>(sizeof(c_type) * CHAR_BIT); }
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
 
   std::string name() const override { return "date32"; }
+  DateUnit unit() const override { return UNIT; }
 };
 
 /// Concrete type class for 64-bit date data (as number of milliseconds since UNIX epoch)
 class ARROW_EXPORT Date64Type : public DateType {
  public:
   static constexpr Type::type type_id = Type::DATE64;
+  static constexpr DateUnit UNIT = DateUnit::MILLI;
 
   using c_type = int64_t;
 
@@ -613,13 +631,14 @@ class ARROW_EXPORT Date64Type : public DateType {
 
   int bit_width() const override { return static_cast<int>(sizeof(c_type) * CHAR_BIT); }
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
 
   std::string name() const override { return "date64"; }
+  DateUnit unit() const override { return UNIT; }
 };
 
 struct TimeUnit {
+  /// The unit for a time or timestamp DataType
   enum type { SECOND = 0, MILLI = 1, MICRO = 2, NANO = 3 };
 };
 
@@ -660,7 +679,6 @@ class ARROW_EXPORT Time32Type : public TimeType {
 
   explicit Time32Type(TimeUnit::type unit = TimeUnit::MILLI);
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
 
   std::string name() const override { return "time32"; }
@@ -675,7 +693,6 @@ class ARROW_EXPORT Time64Type : public TimeType {
 
   explicit Time64Type(TimeUnit::type unit = TimeUnit::MILLI);
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
 
   std::string name() const override { return "time64"; }
@@ -696,7 +713,6 @@ class ARROW_EXPORT TimestampType : public FixedWidthType, public ParametricType 
   explicit TimestampType(TimeUnit::type unit, const std::string& timezone)
       : FixedWidthType(Type::TIMESTAMP), unit_(unit), timezone_(timezone) {}
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
   std::string name() const override { return "timestamp"; }
 
@@ -720,7 +736,6 @@ class ARROW_EXPORT IntervalType : public FixedWidthType {
   explicit IntervalType(Unit unit = Unit::YEAR_MONTH)
       : FixedWidthType(Type::INTERVAL), unit_(unit) {}
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override { return name(); }
   std::string name() const override { return "date"; }
 
@@ -747,11 +762,27 @@ class ARROW_EXPORT DictionaryType : public FixedWidthType {
 
   std::shared_ptr<Array> dictionary() const;
 
-  Status Accept(TypeVisitor* visitor) const override;
   std::string ToString() const override;
   std::string name() const override { return "dictionary"; }
 
   bool ordered() const { return ordered_; }
+
+  /// \brief Unify several dictionary types
+  ///
+  /// Compute a resulting dictionary that will allow the union of values
+  /// of all input dictionary types.  The input types must all have the
+  /// same value type.
+  /// \param[in] pool Memory pool to allocate dictionary values from
+  /// \param[in] types A sequence of input dictionary types
+  /// \param[out] out_type The unified dictionary type
+  /// \param[out] out_transpose_maps (optionally) A sequence of integer vectors,
+  ///     one per input type.  Each integer vector represents the transposition
+  ///     of input type indices into unified type indices.
+  // XXX Should we return something special (an empty transpose map?) when
+  // the transposition is the identity function?
+  static Status Unify(MemoryPool* pool, const std::vector<const DataType*>& types,
+                      std::shared_ptr<DataType>* out_type,
+                      std::vector<std::vector<int32_t>>* out_transpose_maps = NULLPTR);
 
  private:
   // Must be an integer type (not currently checked)
@@ -785,10 +816,18 @@ class ARROW_EXPORT Schema {
   /// Returns null if name not found
   std::shared_ptr<Field> GetFieldByName(const std::string& name) const;
 
+  /// Return all fields having this name
+  std::vector<std::shared_ptr<Field>> GetAllFieldsByName(const std::string& name) const;
+
   /// Returns -1 if name not found
-  int64_t GetFieldIndex(const std::string& name) const;
+  int GetFieldIndex(const std::string& name) const;
+
+  /// Return the indices of all fields having this name
+  std::vector<int> GetAllFieldIndices(const std::string& name) const;
 
   const std::vector<std::shared_ptr<Field>>& fields() const { return fields_; }
+
+  std::vector<std::string> field_names() const;
 
   /// \brief The custom key-value metadata, if any
   ///
@@ -823,8 +862,7 @@ class ARROW_EXPORT Schema {
  private:
   std::vector<std::shared_ptr<Field>> fields_;
 
-  /// Lazily initialized mapping
-  mutable std::unordered_map<std::string, int> name_to_index_;
+  std::unordered_multimap<std::string, int> name_to_index_;
 
   std::shared_ptr<const KeyValueMetadata> metadata_;
 };
@@ -832,6 +870,9 @@ class ARROW_EXPORT Schema {
 // ----------------------------------------------------------------------
 // Parametric factory functions
 // Other factory functions are in type_fwd.h
+
+/// \addtogroup type-factories
+/// @{
 
 /// \brief Create a FixedSizeBinaryType instance
 ARROW_EXPORT
@@ -886,6 +927,13 @@ std::shared_ptr<DataType> ARROW_EXPORT
 dictionary(const std::shared_ptr<DataType>& index_type,
            const std::shared_ptr<Array>& values, bool ordered = false);
 
+/// @}
+
+/// \defgroup schema-factories Factory functions for fields and schemas
+///
+/// Factory functions for fields and schemas
+/// @{
+
 /// \brief Create a Field instance
 ///
 /// \param name the field name
@@ -915,6 +963,8 @@ ARROW_EXPORT
 std::shared_ptr<Schema> schema(
     std::vector<std::shared_ptr<Field>>&& fields,
     const std::shared_ptr<const KeyValueMetadata>& metadata = NULLPTR);
+
+/// @}
 
 }  // namespace arrow
 

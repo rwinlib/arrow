@@ -18,21 +18,14 @@
 #ifndef ARROW_COMPUTE_KERNELS_BOOLEAN_H
 #define ARROW_COMPUTE_KERNELS_BOOLEAN_H
 
-#include <memory>
-
 #include "arrow/status.h"
 #include "arrow/util/visibility.h"
 
-#include "arrow/compute/kernel.h"
-
 namespace arrow {
-
-class Array;
-class ChunkedArray;
-class Column;
-class DataType;
-
 namespace compute {
+
+struct Datum;
+class FunctionContext;
 
 /// \brief Invert the values of a boolean datum
 /// \param[in] context the FunctionContext
@@ -44,7 +37,7 @@ namespace compute {
 ARROW_EXPORT
 Status Invert(FunctionContext* context, const Datum& value, Datum* out);
 
-/// \brief Element-wise AND of two boolean dates
+/// \brief Element-wise AND of two boolean datums
 /// \param[in] context the FunctionContext
 /// \param[in] left left operand (array)
 /// \param[in] right right operand (array)
@@ -55,7 +48,7 @@ Status Invert(FunctionContext* context, const Datum& value, Datum* out);
 ARROW_EXPORT
 Status And(FunctionContext* context, const Datum& left, const Datum& right, Datum* out);
 
-/// \brief Element-wise OR of two boolean dates
+/// \brief Element-wise OR of two boolean datums
 /// \param[in] context the FunctionContext
 /// \param[in] left left operand (array)
 /// \param[in] right right operand (array)
@@ -66,7 +59,7 @@ Status And(FunctionContext* context, const Datum& left, const Datum& right, Datu
 ARROW_EXPORT
 Status Or(FunctionContext* context, const Datum& left, const Datum& right, Datum* out);
 
-/// \brief Element-wise XOR of two boolean dates
+/// \brief Element-wise XOR of two boolean datums
 /// \param[in] context the FunctionContext
 /// \param[in] left left operand (array)
 /// \param[in] right right operand (array)

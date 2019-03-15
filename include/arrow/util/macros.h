@@ -18,6 +18,11 @@
 #ifndef ARROW_UTIL_MACROS_H
 #define ARROW_UTIL_MACROS_H
 
+#include <cstdint>
+
+#define ARROW_STRINGIFY(x) #x
+#define ARROW_CONCAT(x, y) x##y
+
 // From Google gutil
 #ifndef ARROW_DISALLOW_COPY_AND_ASSIGN
 #define ARROW_DISALLOW_COPY_AND_ASSIGN(TypeName) \
@@ -110,6 +115,26 @@
 #error Unknown compiler, please define structure alignment macros
 #endif
 #endif  // !defined(MANUALLY_ALIGNED_STRUCT)
+
+// ----------------------------------------------------------------------
+// Convenience macro disabling a particular UBSan check in a function
+
+#if defined(__clang__)
+#define ARROW_DISABLE_UBSAN(feature) __attribute__((no_sanitize(feature)))
+#else
+#define ARROW_DISABLE_UBSAN(feature)
+#endif
+
+// ----------------------------------------------------------------------
+// Machine information
+
+#if INTPTR_MAX == INT64_MAX
+#define ARROW_BITNESS 64
+#elif INTPTR_MAX == INT32_MAX
+#define ARROW_BITNESS 32
+#else
+#error Unexpected INTPTR_MAX
+#endif
 
 // ----------------------------------------------------------------------
 // From googletest

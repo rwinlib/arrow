@@ -25,6 +25,7 @@
 
 #include "arrow/buffer.h"
 #include "arrow/type.h"
+#include "arrow/type_traits.h"
 #include "arrow/util/macros.h"
 #include "arrow/util/visibility.h"
 
@@ -50,6 +51,9 @@ static inline bool is_tensor_supported(Type::type type_id) {
   return false;
 }
 
+template <typename SparseIndexType>
+class SparseTensorImpl;
+
 class ARROW_EXPORT Tensor {
  public:
   virtual ~Tensor() = default;
@@ -62,7 +66,7 @@ class ARROW_EXPORT Tensor {
   Tensor(const std::shared_ptr<DataType>& type, const std::shared_ptr<Buffer>& data,
          const std::vector<int64_t>& shape, const std::vector<int64_t>& strides);
 
-  /// Constructor with strides and dimension names
+  /// Constructor with non-negative strides and dimension names
   Tensor(const std::shared_ptr<DataType>& type, const std::shared_ptr<Buffer>& data,
          const std::vector<int64_t>& shape, const std::vector<int64_t>& strides,
          const std::vector<std::string>& dim_names);
@@ -78,6 +82,7 @@ class ARROW_EXPORT Tensor {
 
   int ndim() const { return static_cast<int>(shape_.size()); }
 
+  const std::vector<std::string>& dim_names() const { return dim_names_; }
   const std::string& dim_name(int i) const;
 
   /// Total number of value cells in the tensor
@@ -99,6 +104,9 @@ class ARROW_EXPORT Tensor {
 
   bool Equals(const Tensor& other) const;
 
+  /// Compute the number of non-zero values in the tensor
+  Status CountNonZero(int64_t* result) const;
+
  protected:
   Tensor() {}
 
@@ -110,8 +118,48 @@ class ARROW_EXPORT Tensor {
   /// These names are optional
   std::vector<std::string> dim_names_;
 
+  template <typename SparseIndexType>
+  friend class SparseTensorImpl;
+
  private:
   ARROW_DISALLOW_COPY_AND_ASSIGN(Tensor);
+};
+
+template <typename TYPE>
+class NumericTensor : public Tensor {
+ public:
+  using TypeClass = TYPE;
+  using value_type = typename TypeClass::c_type;
+
+  /// Constructor with non-negative strides and dimension names
+  NumericTensor(const std::shared_ptr<Buffer>& data, const std::vector<int64_t>& shape,
+                const std::vector<int64_t>& strides,
+                const std::vector<std::string>& dim_names)
+      : Tensor(TypeTraits<TYPE>::type_singleton(), data, shape, strides, dim_names) {}
+
+  /// Constructor with no dimension names or strides, data assumed to be row-major
+  NumericTensor(const std::shared_ptr<Buffer>& data, const std::vector<int64_t>& shape)
+      : NumericTensor(data, shape, {}, {}) {}
+
+  /// Constructor with non-negative strides
+  NumericTensor(const std::shared_ptr<Buffer>& data, const std::vector<int64_t>& shape,
+                const std::vector<int64_t>& strides)
+      : NumericTensor(data, shape, strides, {}) {}
+
+  const value_type& Value(const std::vector<int64_t>& index) const {
+    int64_t offset = CalculateValueOffset(index);
+    const value_type* ptr = reinterpret_cast<const value_type*>(raw_data() + offset);
+    return *ptr;
+  }
+
+ protected:
+  int64_t CalculateValueOffset(const std::vector<int64_t>& index) const {
+    int64_t offset = 0;
+    for (size_t i = 0; i < index.size(); ++i) {
+      offset += index[i] * strides_[i];
+    }
+    return offset;
+  }
 };
 
 }  // namespace arrow

@@ -18,14 +18,43 @@
 #ifndef ARROW_MEMORY_POOL_H
 #define ARROW_MEMORY_POOL_H
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 
+#include "arrow/status.h"
 #include "arrow/util/visibility.h"
 
 namespace arrow {
 
-class Status;
+namespace internal {
+
+///////////////////////////////////////////////////////////////////////
+// Helper tracking memory statistics
+
+class MemoryPoolStats {
+ public:
+  MemoryPoolStats() : bytes_allocated_(0), max_memory_(0) {}
+
+  int64_t max_memory() const { return max_memory_.load(); }
+
+  int64_t bytes_allocated() const { return bytes_allocated_.load(); }
+
+  inline void UpdateAllocatedBytes(int64_t diff) {
+    auto allocated = bytes_allocated_.fetch_add(diff) + diff;
+    // "maximum" allocated memory is ill-defined in multi-threaded code,
+    // so don't try to be too rigorous here
+    if (diff > 0 && allocated > max_memory_) {
+      max_memory_ = allocated;
+    }
+  }
+
+ protected:
+  std::atomic<int64_t> bytes_allocated_;
+  std::atomic<int64_t> max_memory_;
+};
+
+}  // namespace internal
 
 /// Base class for memory allocation.
 ///
@@ -34,6 +63,9 @@ class Status;
 class ARROW_EXPORT MemoryPool {
  public:
   virtual ~MemoryPool();
+
+  /// \brief EXPERIMENTAL. Create a new instance of the default MemoryPool
+  static std::unique_ptr<MemoryPool> CreateDefault();
 
   /// Allocate a new memory region of at least size bytes.
   ///
@@ -109,6 +141,7 @@ class ARROW_EXPORT ProxyMemoryPool : public MemoryPool {
   std::unique_ptr<ProxyMemoryPoolImpl> impl_;
 };
 
+/// Return the process-wide default memory pool.
 ARROW_EXPORT MemoryPool* default_memory_pool();
 
 #ifdef ARROW_NO_DEFAULT_MEMORY_POOL

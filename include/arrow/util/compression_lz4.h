@@ -19,6 +19,7 @@
 #define ARROW_UTIL_COMPRESSION_LZ4_H
 
 #include <cstdint>
+#include <memory>
 
 #include "arrow/status.h"
 #include "arrow/util/compression.h"
@@ -30,13 +31,20 @@ namespace util {
 // Lz4 codec.
 class ARROW_EXPORT Lz4Codec : public Codec {
  public:
-  Status Decompress(int64_t input_len, const uint8_t* input, int64_t output_len,
+  Status Decompress(int64_t input_len, const uint8_t* input, int64_t output_buffer_len,
                     uint8_t* output_buffer) override;
 
+  Status Decompress(int64_t input_len, const uint8_t* input, int64_t output_buffer_len,
+                    uint8_t* output_buffer, int64_t* output_len) override;
+
   Status Compress(int64_t input_len, const uint8_t* input, int64_t output_buffer_len,
-                  uint8_t* output_buffer, int64_t* output_length) override;
+                  uint8_t* output_buffer, int64_t* output_len) override;
 
   int64_t MaxCompressedLen(int64_t input_len, const uint8_t* input) override;
+
+  Status MakeCompressor(std::shared_ptr<Compressor>* out) override;
+
+  Status MakeDecompressor(std::shared_ptr<Decompressor>* out) override;
 
   const char* name() const override { return "lz4"; }
 };

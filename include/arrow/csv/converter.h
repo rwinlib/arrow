@@ -18,24 +18,27 @@
 #ifndef ARROW_CSV_CONVERTER_H
 #define ARROW_CSV_CONVERTER_H
 
+#include <cstdint>
 #include <memory>
 
 #include "arrow/csv/options.h"
-#include "arrow/csv/parser.h"
-#include "arrow/memory_pool.h"
+#include "arrow/util/macros.h"
 #include "arrow/util/visibility.h"
 
 namespace arrow {
 
 class Array;
 class DataType;
+class MemoryPool;
 class Status;
 
 namespace csv {
 
+class BlockParser;
+
 class ARROW_EXPORT Converter {
  public:
-  Converter(const std::shared_ptr<DataType>& type, ConvertOptions options,
+  Converter(const std::shared_ptr<DataType>& type, const ConvertOptions& options,
             MemoryPool* pool);
   virtual ~Converter() = default;
 
@@ -44,15 +47,17 @@ class ARROW_EXPORT Converter {
 
   std::shared_ptr<DataType> type() const { return type_; }
 
-  static Status Make(const std::shared_ptr<DataType>& type, ConvertOptions options,
+  static Status Make(const std::shared_ptr<DataType>& type, const ConvertOptions& options,
                      std::shared_ptr<Converter>* out);
-  static Status Make(const std::shared_ptr<DataType>& type, ConvertOptions options,
+  static Status Make(const std::shared_ptr<DataType>& type, const ConvertOptions& options,
                      MemoryPool* pool, std::shared_ptr<Converter>* out);
 
  protected:
   ARROW_DISALLOW_COPY_AND_ASSIGN(Converter);
 
-  ConvertOptions options_;
+  virtual Status Initialize() = 0;
+
+  const ConvertOptions options_;
   MemoryPool* pool_;
   std::shared_ptr<DataType> type_;
 };
