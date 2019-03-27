@@ -1,4 +1,4 @@
 # Apache Arrow
 
-Snapshot of git at March 15, 2019. Backported with https://github.com/r-windows/rtools-backports
+Apache Arrow 0.13 RC3. Backported with https://github.com/r-windows/rtools-backports
 
