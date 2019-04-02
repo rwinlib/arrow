@@ -15,5 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#define ARROW_VERSION_MAJOR 0
+#define ARROW_VERSION_MINOR 13
+#define ARROW_VERSION_PATCH 0
+#define ARROW_VERSION ((ARROW_VERSION_MAJOR * 1000) + ARROW_VERSION_MINOR) * 1000 + ARROW_VERSION_PATCH
+
 /* #undef DOUBLE_CONVERSION_HAS_CASE_INSENSIBILITY */
 /* #undef GRPCPP_PP_INCLUDE */
