@@ -1,4 +1,5 @@
 # Apache Arrow
 
-Snapshot of git at March 15, 2019. Backported with https://github.com/r-windows/rtools-backports
+Backported with https://github.com/r-windows/rtools-backports
 
+Now fully supports parquet (compile with `-DARROW_R_WITH_PARQUET`).
