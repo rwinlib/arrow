@@ -20,10 +20,6 @@
 #include <string>
 #include <utility>
 
-#ifdef ARROW_EXTRA_ERROR_CONTEXT
-#include <sstream>
-#endif
-
 #include "arrow/util/macros.h"
 #include "arrow/util/string_builder.h"
 #include "arrow/util/visibility.h"
@@ -31,14 +27,13 @@
 #ifdef ARROW_EXTRA_ERROR_CONTEXT
 
 /// \brief Return with given status if condition is met.
-#define ARROW_RETURN_IF_(condition, status, expr)                                     \
-  do {                                                                                \
-    if (ARROW_PREDICT_FALSE(condition)) {                                             \
-      ::arrow::Status _s = (status);                                                  \
-      std::stringstream ss;                                                           \
-      ss << _s.message() << "\n" << __FILE__ << ":" << __LINE__ << " code: " << expr; \
-      return ::arrow::Status(_s.code(), ss.str());                                    \
-    }                                                                                 \
+#define ARROW_RETURN_IF_(condition, status, expr)   \
+  do {                                              \
+    if (ARROW_PREDICT_FALSE(condition)) {           \
+      ::arrow::Status _st = (status);               \
+      _st.AddContextLine(__FILE__, __LINE__, expr); \
+      return _st;                                   \
+    }                                               \
   } while (0)
 
 #else
@@ -86,6 +81,7 @@ enum class StatusCode : char {
   Invalid = 4,
   IOError = 5,
   CapacityError = 6,
+  IndexError = 7,
   UnknownError = 9,
   NotImplemented = 10,
   SerializationError = 11,
@@ -193,6 +189,13 @@ class ARROW_EXPORT Status {
     return Status(StatusCode::Invalid, util::StringBuilder(std::forward<Args>(args)...));
   }
 
+  /// Return an error status when an index is out of bounds
+  template <typename... Args>
+  static Status IndexError(Args&&... args) {
+    return Status(StatusCode::IndexError,
+                  util::StringBuilder(std::forward<Args>(args)...));
+  }
+
   /// Return an error status when a container's capacity would exceed its limits
   template <typename... Args>
   static Status CapacityError(Args&&... args) {
@@ -275,6 +278,8 @@ class ARROW_EXPORT Status {
   bool IsIOError() const { return code() == StatusCode::IOError; }
   /// Return true iff the status indicates a container reaching capacity limits.
   bool IsCapacityError() const { return code() == StatusCode::CapacityError; }
+  /// Return true iff the status indicates an out of bounds index.
+  bool IsIndexError() const { return code() == StatusCode::IndexError; }
   /// Return true iff the status indicates a type error.
   bool IsTypeError() const { return code() == StatusCode::TypeError; }
   /// Return true iff the status indicates an unknown error.
@@ -324,6 +329,13 @@ class ARROW_EXPORT Status {
 
   /// \brief Return the specific error message attached to this status.
   std::string message() const { return ok() ? "" : state_->msg; }
+
+  [[noreturn]] void Abort() const;
+  [[noreturn]] void Abort(const std::string& message) const;
+
+#ifdef ARROW_EXTRA_ERROR_CONTEXT
+  void AddContextLine(const char* filename, int line, const char* expr);
+#endif
 
  private:
   struct State {

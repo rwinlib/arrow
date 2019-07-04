@@ -15,20 +15,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef PARQUET_UTIL_MACROS_H
-#define PARQUET_UTIL_MACROS_H
+#pragma once
 
-#include "arrow/util/macros.h"
+#include <memory>
+#include <string>
+#include <vector>
 
-#define PARQUET_DISALLOW_COPY_AND_ASSIGN ARROW_DISALLOW_COPY_AND_ASSIGN
+#include "arrow/dataset/type_fwd.h"
+#include "arrow/dataset/visibility.h"
 
-#define PARQUET_NORETURN ARROW_NORETURN
-#define PARQUET_DEPRECATED ARROW_DEPRECATED
+namespace arrow {
+namespace dataset {
 
-// If ARROW_VALGRIND set when compiling unit tests, also define
-// PARQUET_VALGRIND
-#ifdef ARROW_VALGRIND
-#define PARQUET_VALGRIND
-#endif
+class ARROW_DS_EXPORT WriteOptions {
+ public:
+  virtual ~WriteOptions() = default;
+};
 
-#endif  // PARQUET_UTIL_MACROS_H
+}  // namespace dataset
+}  // namespace arrow
