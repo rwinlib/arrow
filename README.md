@@ -1,4 +1,4 @@
-# Apache Arrow 0.14.0
+# Apache Arrow 0.14.1
 
 Backports for the R legacy toolchain [lib-4.9.3](lib-4.9.3) built with [rtools-backports](https://github.com/r-windows/rtools-backports/blob/master/mingw-w64-arrow/PKGBUILD).
 
