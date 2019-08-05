@@ -15,22 +15,43 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_UTIL_VARIANT_H
-#define ARROW_UTIL_VARIANT_H
+#pragma once
 
-#include "arrow/vendored/variant.hpp"  // IWYU pragma: export
+#include <atomic>
+#include <memory>
+#include <utility>
 
 namespace arrow {
-namespace util {
+namespace internal {
 
-using ::mpark::bad_variant_access;
-using ::mpark::get;
-using ::mpark::get_if;
-using ::mpark::holds_alternative;
-using ::mpark::variant;
-using ::mpark::visit;
+#if !defined(__clang__) && defined(__GNUC__) && __GNUC__ < 5
 
-}  // namespace util
+// atomic shared_ptr operations only appeared in gcc 5,
+// emulate them with unsafe ops on gcc 4.x.
+
+template <class T>
+inline std::shared_ptr<T> atomic_load(const std::shared_ptr<T>* p) {
+  return *p;
+}
+
+template <class T>
+inline void atomic_store(std::shared_ptr<T>* p, std::shared_ptr<T> r) {
+  *p = r;
+}
+
+#else
+
+template <class T>
+inline std::shared_ptr<T> atomic_load(const std::shared_ptr<T>* p) {
+  return std::atomic_load(p);
+}
+
+template <class T>
+inline void atomic_store(std::shared_ptr<T>* p, std::shared_ptr<T> r) {
+  std::atomic_store(p, std::move(r));
+}
+
+#endif
+
+}  // namespace internal
 }  // namespace arrow
-
-#endif  // ARROW_UTIL_VARIANT_H
