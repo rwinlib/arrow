@@ -24,7 +24,7 @@
 #include <algorithm>
 #include <cstdint>
 
-#include "arrow/util/bit-util.h"
+#include "arrow/util/bit_util.h"
 #include "arrow/util/bpacking.h"
 #include "arrow/util/logging.h"
 #include "arrow/util/macros.h"

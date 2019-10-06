@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "arrow/testing/gtest_util.h"
-#include "arrow/util/cpu-info.h"
+#include "arrow/util/cpu_info.h"
 
 namespace arrow {
 namespace compute {

@@ -15,14 +15,32 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_UTIL_LAZY_H
-#define ARROW_UTIL_LAZY_H
+#pragma once
 
 #include <iterator>
+#include <numeric>
 #include <utility>
+#include <vector>
 
 namespace arrow {
 namespace internal {
+
+/// Create a vector containing the values from start up to stop
+template <typename T>
+std::vector<T> Iota(T start, T stop) {
+  if (start > stop) {
+    return {};
+  }
+  std::vector<T> result(static_cast<size_t>(stop - start));
+  std::iota(result.begin(), result.end(), start);
+  return result;
+}
+
+/// Create a vector containing the values from 0 up to length
+template <typename T>
+std::vector<T> Iota(T length) {
+  return Iota(static_cast<T>(0), length);
+}
 
 /// Create a range from a callable which takes a single index parameter
 /// and returns the value of iterator on each call and a length.
@@ -67,13 +85,17 @@ class LazyRange {
     using _Unchecked_type = typename LazyRange<Generator>::RangeIter;
 #endif
 
+    RangeIter() = delete;
+    RangeIter(const RangeIter& other) = default;
+    RangeIter& operator=(const RangeIter& other) = default;
+
     RangeIter(const LazyRange<Generator>& range, int64_t index)
-        : range_(range), index_(index) {}
+        : range_(&range), index_(index) {}
 
-    const return_type operator*() { return range_.gen_(index_); }
+    const return_type operator*() const { return range_->gen_(index_); }
 
-    RangeIter operator+(difference_type length) {
-      return RangeIter(range_, index_ + length);
+    RangeIter operator+(difference_type length) const {
+      return RangeIter(*range_, index_ + length);
     }
 
     // pre-increment
@@ -90,20 +112,24 @@ class LazyRange {
     }
 
     bool operator==(const typename LazyRange<Generator>::RangeIter& other) const {
-      return this->index_ == other.index_ && &this->range_ == &other.range_;
+      return this->index_ == other.index_ && this->range_ == other.range_;
     }
 
     bool operator!=(const typename LazyRange<Generator>::RangeIter& other) const {
-      return this->index_ != other.index_ || &this->range_ != &other.range_;
+      return this->index_ != other.index_ || this->range_ != other.range_;
     }
 
-    int64_t operator-(const typename LazyRange<Generator>::RangeIter& other) {
+    int64_t operator-(const typename LazyRange<Generator>::RangeIter& other) const {
       return this->index_ - other.index_;
+    }
+
+    bool operator<(const typename LazyRange<Generator>::RangeIter& other) const {
+      return this->index_ < other.index_;
     }
 
    private:
     // parent range reference
-    const LazyRange& range_;
+    const LazyRange* range_;
     // current index
     int64_t index_;
   };
@@ -125,4 +151,3 @@ LazyRange<Generator> MakeLazyRange(Generator&& gen, int64_t length) {
 
 }  // namespace internal
 }  // namespace arrow
-#endif

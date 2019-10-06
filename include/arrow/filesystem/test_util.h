@@ -29,6 +29,27 @@ namespace fs {
 
 static constexpr double kTimeSlack = 2.0;  // In seconds
 
+static inline FileStats File(std::string path) {
+  FileStats st;
+  st.set_type(FileType::File);
+  st.set_path(path);
+  return st;
+}
+
+static inline FileStats Dir(std::string path) {
+  FileStats st;
+  st.set_type(FileType::Directory);
+  st.set_path(path);
+  return st;
+}
+
+ARROW_EXPORT
+void CreateFile(FileSystem* fs, const std::string& path, const std::string& data);
+
+// Sort a vector of FileStats by lexicographic path order
+ARROW_EXPORT
+void SortStats(std::vector<FileStats>* stats);
+
 ARROW_EXPORT
 void AssertFileStats(const FileStats& st, const std::string& path, FileType type);
 
@@ -45,11 +66,23 @@ void AssertFileStats(const FileStats& st, const std::string& path, FileType type
                      int64_t size);
 
 ARROW_EXPORT
-void CreateFile(FileSystem* fs, const std::string& path, const std::string& data);
+void AssertFileStats(FileSystem* fs, const std::string& path, FileType type);
 
-// Sort of vector of FileStats by lexicographic path order
 ARROW_EXPORT
-void SortStats(std::vector<FileStats>* stats);
+void AssertFileStats(FileSystem* fs, const std::string& path, FileType type,
+                     TimePoint mtime);
+
+ARROW_EXPORT
+void AssertFileStats(FileSystem* fs, const std::string& path, FileType type,
+                     TimePoint mtime, int64_t size);
+
+ARROW_EXPORT
+void AssertFileStats(FileSystem* fs, const std::string& path, FileType type,
+                     int64_t size);
+
+ARROW_EXPORT
+void AssertFileContents(FileSystem* fs, const std::string& path,
+                        const std::string& expected_data);
 
 template <typename Duration>
 void AssertDurationBetween(Duration d, double min_secs, double max_secs) {
@@ -69,6 +102,7 @@ class ARROW_EXPORT GenericFileSystemTest {
   void TestEmpty();
   void TestCreateDir();
   void TestDeleteDir();
+  void TestDeleteDirContents();
   void TestDeleteFile();
   void TestDeleteFiles();
   void TestMoveFile();
@@ -77,17 +111,33 @@ class ARROW_EXPORT GenericFileSystemTest {
   void TestGetTargetStatsSingle();
   void TestGetTargetStatsVector();
   void TestGetTargetStatsSelector();
+  void TestGetTargetStatsSelectorWithRecursion();
   void TestOpenOutputStream();
   void TestOpenAppendStream();
   void TestOpenInputStream();
   void TestOpenInputFile();
 
  protected:
+  // This function should return the filesystem under test.
   virtual std::shared_ptr<FileSystem> GetEmptyFileSystem() = 0;
+
+  // Override the following functions to specify deviations from expected
+  // filesystem semantics.
+  // - Whether the filesystem may "implicitly" create intermediate directories
+  virtual bool have_implicit_directories() const { return false; }
+  // - Whether the filesystem may allow writing a file "over" a directory
+  virtual bool allow_write_file_over_dir() const { return false; }
+  // - Whether the filesystem allows moving a directory
+  virtual bool allow_move_dir() const { return true; }
+  // - Whether the filesystem allows appending to a file
+  virtual bool allow_append_to_file() const { return true; }
+  // - Whether the filesystem supports directory modification times
+  virtual bool have_directory_mtimes() const { return true; }
 
   void TestEmpty(FileSystem* fs);
   void TestCreateDir(FileSystem* fs);
   void TestDeleteDir(FileSystem* fs);
+  void TestDeleteDirContents(FileSystem* fs);
   void TestDeleteFile(FileSystem* fs);
   void TestDeleteFiles(FileSystem* fs);
   void TestMoveFile(FileSystem* fs);
@@ -96,6 +146,7 @@ class ARROW_EXPORT GenericFileSystemTest {
   void TestGetTargetStatsSingle(FileSystem* fs);
   void TestGetTargetStatsVector(FileSystem* fs);
   void TestGetTargetStatsSelector(FileSystem* fs);
+  void TestGetTargetStatsSelectorWithRecursion(FileSystem* fs);
   void TestOpenOutputStream(FileSystem* fs);
   void TestOpenAppendStream(FileSystem* fs);
   void TestOpenInputStream(FileSystem* fs);
@@ -105,21 +156,23 @@ class ARROW_EXPORT GenericFileSystemTest {
 #define GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, NAME) \
   TEST_MACRO(TEST_CLASS, NAME) { this->Test##NAME(); }
 
-#define GENERIC_FS_TEST_FUNCTIONS_MACROS(TEST_MACRO, TEST_CLASS)           \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, Empty)                  \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, CreateDir)              \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, DeleteDir)              \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, DeleteFile)             \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, DeleteFiles)            \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, MoveFile)               \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, MoveDir)                \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, CopyFile)               \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, GetTargetStatsSingle)   \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, GetTargetStatsVector)   \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, GetTargetStatsSelector) \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, OpenOutputStream)       \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, OpenAppendStream)       \
-  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, OpenInputStream)        \
+#define GENERIC_FS_TEST_FUNCTIONS_MACROS(TEST_MACRO, TEST_CLASS)                        \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, Empty)                               \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, CreateDir)                           \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, DeleteDir)                           \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, DeleteDirContents)                   \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, DeleteFile)                          \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, DeleteFiles)                         \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, MoveFile)                            \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, MoveDir)                             \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, CopyFile)                            \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, GetTargetStatsSingle)                \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, GetTargetStatsVector)                \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, GetTargetStatsSelector)              \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, GetTargetStatsSelectorWithRecursion) \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, OpenOutputStream)                    \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, OpenAppendStream)                    \
+  GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, OpenInputStream)                     \
   GENERIC_FS_TEST_FUNCTION(TEST_MACRO, TEST_CLASS, OpenInputFile)
 
 #define GENERIC_FS_TEST_FUNCTIONS(TEST_CLASS) \

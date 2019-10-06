@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-#include "arrow/json/rapidjson-defs.h"
+#include "arrow/json/rapidjson_defs.h"
 #include "rapidjson/document.h"
 #include "rapidjson/prettywriter.h"
 #include "rapidjson/reader.h"

@@ -19,47 +19,116 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "arrow/dataset/type_fwd.h"
 #include "arrow/dataset/visibility.h"
+#include "arrow/memory_pool.h"
 
 namespace arrow {
 namespace dataset {
 
 /// \brief Shared state for a Scan operation
-struct ARROW_DS_EXPORT ScanContext {};
-
-// TODO(wesm): API for handling of post-materialization filters. For
-// example, if the user requests [$col1 > 0, $col2 > 0] and $col1 is a
-// partition key, but $col2 is not, then the filter "$col2 > 0" must
-// be evaluated in-memory against the RecordBatch objects resulting
-// from the Scan
+struct ARROW_DS_EXPORT ScanContext {
+  MemoryPool* pool = arrow::default_memory_pool();
+};
 
 class ARROW_DS_EXPORT ScanOptions {
  public:
+  ScanOptions() = default;
+
+  ScanOptions(std::shared_ptr<DataSelector> selector, std::shared_ptr<Schema> schema,
+              std::vector<std::shared_ptr<FileScanOptions>> options = {})
+      : selector(std::move(selector)), schema(std::move(schema)) {}
+
   virtual ~ScanOptions() = default;
+
+  MemoryPool* pool() const { return pool_; }
+
+  // Filters
+  std::shared_ptr<DataSelector> selector;
+
+  // Schema to which record batches will be reconciled
+  std::shared_ptr<Schema> schema;
+
+  MemoryPool* pool_ = default_memory_pool();
+
+  std::vector<std::shared_ptr<FileScanOptions>> options;
 };
 
-/// \brief Read record batches from a range of a single data fragment
+/// \brief Read record batches from a range of a single data fragment. A
+/// ScanTask is meant to be a unit of work to be dispatched. The implementation
+/// must be thread and concurrent safe.
 class ARROW_DS_EXPORT ScanTask {
  public:
-  virtual ~ScanTask() = default;
-
   /// \brief Iterate through sequence of materialized record batches
   /// resulting from the Scan. Execution semantics encapsulated in the
   /// particular ScanTask implementation
-  virtual std::unique_ptr<RecordBatchIterator> Scan() = 0;
+  virtual RecordBatchIterator Scan() = 0;
+
+  virtual ~ScanTask() = default;
 };
 
-/// \brief Main interface for
+/// \brief A trivial ScanTask that yields the RecordBatch of an array.
+class ARROW_DS_EXPORT SimpleScanTask : public ScanTask {
+ public:
+  explicit SimpleScanTask(std::vector<std::shared_ptr<RecordBatch>> record_batches)
+      : record_batches_(std::move(record_batches)) {}
+
+  RecordBatchIterator Scan() override;
+
+ protected:
+  std::vector<std::shared_ptr<RecordBatch>> record_batches_;
+};
+
+/// \brief Scanner is a materialized scan operation with context and options
+/// bound. A scanner is the class that glues ScanTask, DataFragment,
+/// and DataSource. In python pseudo code, it performs the following:
+///
+///  def Scan():
+///    for source in this.sources_:
+///      for fragment in source.GetFragments(this.options_):
+///        for scan_task in fragment.Scan(this.context_):
+///          yield scan_task
 class ARROW_DS_EXPORT Scanner {
  public:
-  virtual ~Scanner() = default;
+  /// \brief The Scan operator returns a stream of ScanTask. The caller is
+  /// responsible to dispatch/schedule said tasks. Tasks should be safe to run
+  /// in a concurrent fashion and outlive the iterator.
+  virtual ScanTaskIterator Scan() = 0;
 
-  /// \brief Return iterator yielding ScanTask instances to enable
-  /// serial or parallel execution of units of scanning work
-  virtual std::unique_ptr<ScanTaskIterator> GetTasks() = 0;
+  virtual ~Scanner() = default;
+};
+
+/// \brief SimpleScanner is a trivial Scanner implementation that flattens
+/// chained iterators.
+///
+/// The returned iterator of SimpleScanner::Scan is a serial blocking
+/// iterator. It will block if any of the following methods blocks:
+///  - Iterator::Next
+///  - DataSource::GetFragments
+///  - DataFragment::Scan
+///
+/// Thus, this iterator is not suited for consumption of sources/fragments
+/// where the previous methods can block for a long time, e.g. if fetching a
+/// DataFragment from cloud storage, or a DataFragment must be parsed before
+/// returning a ScanTaskIterator.
+class ARROW_DS_EXPORT SimpleScanner : public Scanner {
+ public:
+  SimpleScanner(std::vector<std::shared_ptr<DataSource>> sources,
+                std::shared_ptr<ScanOptions> options,
+                std::shared_ptr<ScanContext> context)
+      : sources_(std::move(sources)),
+        options_(std::move(options)),
+        context_(std::move(context)) {}
+
+  ScanTaskIterator Scan() override;
+
+ private:
+  std::vector<std::shared_ptr<DataSource>> sources_;
+  std::shared_ptr<ScanOptions> options_;
+  std::shared_ptr<ScanContext> context_;
 };
 
 class ARROW_DS_EXPORT ScannerBuilder {
@@ -80,7 +149,7 @@ class ARROW_DS_EXPORT ScannerBuilder {
   ScannerBuilder* IncludePartitionKeys(bool include = true);
 
   /// \brief Return the constructed now-immutable Scanner object
-  std::unique_ptr<Scanner> Finish() const;
+  Status Finish(std::unique_ptr<Scanner>* out) const;
 
  private:
   std::shared_ptr<Dataset> dataset_;

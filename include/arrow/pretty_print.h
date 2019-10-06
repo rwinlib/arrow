@@ -26,7 +26,6 @@
 namespace arrow {
 
 class Array;
-class Column;
 class ChunkedArray;
 class RecordBatch;
 class Schema;
@@ -62,6 +61,10 @@ struct PrettyPrintOptions {
 ARROW_EXPORT
 Status PrettyPrint(const RecordBatch& batch, int indent, std::ostream* sink);
 
+ARROW_EXPORT
+Status PrettyPrint(const RecordBatch& batch, const PrettyPrintOptions& options,
+                   std::ostream* sink);
+
 /// \brief Print human-readable representation of Table
 ARROW_EXPORT
 Status PrettyPrint(const Table& table, const PrettyPrintOptions& options,
@@ -90,11 +93,6 @@ Status PrettyPrint(const ChunkedArray& chunked_arr, const PrettyPrintOptions& op
 ARROW_EXPORT
 Status PrettyPrint(const ChunkedArray& chunked_arr, const PrettyPrintOptions& options,
                    std::string* result);
-
-/// \brief Print human-readable representation of Column
-ARROW_EXPORT
-Status PrettyPrint(const Column& column, const PrettyPrintOptions& options,
-                   std::ostream* sink);
 
 ARROW_EXPORT
 Status PrettyPrint(const Schema& schema, const PrettyPrintOptions& options,

@@ -1,4 +1,4 @@
-# Apache Arrow 0.14.1
+# Apache Arrow 0.15.0
 
 Backports for the R legacy toolchain [lib-4.9.3](lib-4.9.3) built with [rtools-backports](https://github.com/r-windows/rtools-backports/blob/master/mingw-w64-arrow/PKGBUILD).
 
@@ -18,10 +18,10 @@ PKG_LIBS = \
 	-ldouble-conversion -lsnappy -lz -lws2_32
 ```
 
-The easiest way to test this is using the R package from the [arrow-r-dev](https://github.com/jeroen/arrow-r-dev) repository:
+To test this make sure you install the arrow package from a release tag:
 
 ```r
-remotes::install_github("jeroen/arrow-r-dev")
+remotes::install_github("apache/arrow/r@apache-arrow-0.15.0")
 ```
 
-The upstream R bindings require the libarrow verion from the master branch so it is typically broken.
+To install R package from the arrow master branch you also would need to rebuild the master branch arrow C++ library from source.

@@ -27,7 +27,7 @@
 
 #include "arrow/buffer.h"
 #include "arrow/status.h"
-#include "arrow/util/bit-util.h"
+#include "arrow/util/bit_util.h"
 #include "arrow/util/macros.h"
 #include "arrow/util/ubsan.h"
 #include "arrow/util/visibility.h"
@@ -85,14 +85,13 @@ class ARROW_EXPORT BufferBuilder {
     return Resize(GrowByFactor(capacity_, min_capacity), false);
   }
 
-  /// \brief Return a capacity expanded by an unspecified growth factor
+  /// \brief Return a capacity expanded by the desired growth factor
   static int64_t GrowByFactor(int64_t current_capacity, int64_t new_capacity) {
-    // NOTE: Doubling isn't a great overallocation practice
-    // see https://github.com/facebook/folly/blob/master/folly/docs/FBVector.md
-    // for discussion.
-    // Grow exactly if a large upsize (the caller might know the exact final size).
-    // Otherwise overallocate by 1.5 to keep a linear amortized cost.
-    return std::max(new_capacity, current_capacity * 3 / 2);
+    // Doubling capacity except for large Reserve requests. 2x growth strategy
+    // (versus 1.5x) seems to have slightly better performance when using
+    // jemalloc, but significantly better performance when using the system
+    // allocator. See ARROW-6450 for further discussion
+    return std::max(new_capacity, current_capacity * 2);
   }
 
   /// \brief Append the given data to the buffer
@@ -181,7 +180,9 @@ class TypedBufferBuilder;
 
 /// \brief A BufferBuilder for building a buffer of arithmetic elements
 template <typename T>
-class TypedBufferBuilder<T, typename std::enable_if<std::is_arithmetic<T>::value>::type> {
+class TypedBufferBuilder<
+    T, typename std::enable_if<std::is_arithmetic<T>::value ||
+                               std::is_standard_layout<T>::value>::type> {
  public:
   explicit TypedBufferBuilder(MemoryPool* pool ARROW_MEMORY_POOL_DEFAULT)
       : bytes_builder_(pool) {}
@@ -220,10 +221,8 @@ class TypedBufferBuilder<T, typename std::enable_if<std::is_arithmetic<T>::value
 
   void UnsafeAppend(const int64_t num_copies, T value) {
     auto data = mutable_data() + length();
-    bytes_builder_.UnsafeAppend(num_copies * sizeof(T), 0);
-    for (const auto end = data + num_copies; data != end; ++data) {
-      *data = value;
-    }
+    bytes_builder_.UnsafeAdvance(num_copies * sizeof(T));
+    std::fill(data, data + num_copies, value);
   }
 
   Status Resize(const int64_t new_capacity, bool shrink_to_fit = true) {

@@ -15,18 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
+// Workaround https://github.com/Cyan4973/xxHash/issues/249
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4146)
+#endif
 
-#include "arrow/dataset/visibility.h"
+#include "arrow/vendored/xxhash/xxhash.h"
 
-namespace arrow {
-
-class Status;
-
-template <typename T>
-class Iterator {
- public:
-  virtual Status Next(T* out) = 0;
-}
-
-}  // namespace arrow
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif

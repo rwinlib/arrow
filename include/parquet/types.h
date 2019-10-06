@@ -21,7 +21,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <iterator>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -452,17 +451,20 @@ struct Encoding {
     DELTA_BINARY_PACKED = 5,
     DELTA_LENGTH_BYTE_ARRAY = 6,
     DELTA_BYTE_ARRAY = 7,
-    RLE_DICTIONARY = 8
+    RLE_DICTIONARY = 8,
+    UNKNOWN = 999
   };
 };
 
-// Compression, mirrors parquet::CompressionCodec
-struct Compression {
-  enum type { UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD };
-};
+/// \brief Return true if Parquet supports indicated compression type
+PARQUET_EXPORT
+bool IsCodecSupported(Compression::type codec);
 
 PARQUET_EXPORT
-std::unique_ptr<::arrow::util::Codec> GetCodecFromArrow(Compression::type codec);
+std::unique_ptr<Codec> GetCodec(Compression::type codec);
+
+PARQUET_EXPORT
+std::unique_ptr<Codec> GetCodec(Compression::type codec, int compression_level);
 
 struct Encryption {
   enum type { AES_GCM_V1 = 0, AES_GCM_CTR_V1 = 1 };
@@ -493,6 +495,10 @@ class ColumnOrder {
 struct ByteArray {
   ByteArray() : len(0), ptr(NULLPTR) {}
   ByteArray(uint32_t len, const uint8_t* ptr) : len(len), ptr(ptr) {}
+
+  ByteArray(::arrow::util::string_view view)  // NOLINT implicit conversion
+      : ByteArray(static_cast<uint32_t>(view.size()),
+                  reinterpret_cast<const uint8_t*>(view.data())) {}
   uint32_t len;
   const uint8_t* ptr;
 };
@@ -632,19 +638,19 @@ struct type_traits<Type::FIXED_LEN_BYTE_ARRAY> {
 };
 
 template <Type::type TYPE>
-struct DataType {
+struct PhysicalType {
   using c_type = typename type_traits<TYPE>::value_type;
   static constexpr Type::type type_num = TYPE;
 };
 
-using BooleanType = DataType<Type::BOOLEAN>;
-using Int32Type = DataType<Type::INT32>;
-using Int64Type = DataType<Type::INT64>;
-using Int96Type = DataType<Type::INT96>;
-using FloatType = DataType<Type::FLOAT>;
-using DoubleType = DataType<Type::DOUBLE>;
-using ByteArrayType = DataType<Type::BYTE_ARRAY>;
-using FLBAType = DataType<Type::FIXED_LEN_BYTE_ARRAY>;
+using BooleanType = PhysicalType<Type::BOOLEAN>;
+using Int32Type = PhysicalType<Type::INT32>;
+using Int64Type = PhysicalType<Type::INT64>;
+using Int96Type = PhysicalType<Type::INT96>;
+using FloatType = PhysicalType<Type::FLOAT>;
+using DoubleType = PhysicalType<Type::DOUBLE>;
+using ByteArrayType = PhysicalType<Type::BYTE_ARRAY>;
+using FLBAType = PhysicalType<Type::FIXED_LEN_BYTE_ARRAY>;
 
 template <typename Type>
 inline std::string format_fwf(int width) {
@@ -652,8 +658,6 @@ inline std::string format_fwf(int width) {
   ss << "%-" << width << type_traits<Type::type_num>::printf_code;
   return ss.str();
 }
-
-PARQUET_EXPORT std::string CompressionToString(Compression::type t);
 
 PARQUET_EXPORT std::string EncodingToString(Encoding::type t);
 
@@ -678,6 +682,12 @@ PARQUET_EXPORT SortOrder::type GetSortOrder(ConvertedType::type converted,
 PARQUET_EXPORT SortOrder::type GetSortOrder(
     const std::shared_ptr<const LogicalType>& logical_type, Type::type primitive);
 
+namespace internal {
+
+PARQUET_EXPORT
+int32_t DecimalSize(int32_t precision);
+
+}  // namespace internal
 }  // namespace parquet
 
 #endif  // PARQUET_TYPES_H

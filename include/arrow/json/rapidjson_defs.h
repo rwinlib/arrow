@@ -30,7 +30,7 @@
   }                             \
   }
 
-#include "arrow/util/sse-util.h"
+#include "arrow/util/sse_util.h"
 
 // enable SIMD whitespace skipping, if available
 #if defined(ARROW_HAVE_SSE2)

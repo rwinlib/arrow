@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_TYPE_TRAITS_H
-#define ARROW_TYPE_TRAITS_H
+#pragma once
 
 #include <memory>
 #include <string>
@@ -24,7 +23,7 @@
 #include <vector>
 
 #include "arrow/type_fwd.h"
-#include "arrow/util/bit-util.h"
+#include "arrow/util/bit_util.h"
 
 namespace arrow {
 
@@ -35,7 +34,7 @@ namespace arrow {
 template <typename T>
 struct TypeTraits {};
 
-template <typename T>
+template <typename T, typename Enable = void>
 struct CTypeTraits {};
 
 template <>
@@ -244,6 +243,15 @@ struct TypeTraits<BinaryType> {
 };
 
 template <>
+struct TypeTraits<LargeBinaryType> {
+  using ArrayType = LargeBinaryArray;
+  using BuilderType = LargeBinaryBuilder;
+  using ScalarType = LargeBinaryScalar;
+  constexpr static bool is_parameter_free = true;
+  static inline std::shared_ptr<DataType> type_singleton() { return large_binary(); }
+};
+
+template <>
 struct TypeTraits<FixedSizeBinaryType> {
   using ArrayType = FixedSizeBinaryArray;
   using BuilderType = FixedSizeBinaryBuilder;
@@ -261,6 +269,15 @@ struct TypeTraits<StringType> {
 };
 
 template <>
+struct TypeTraits<LargeStringType> {
+  using ArrayType = LargeStringArray;
+  using BuilderType = LargeStringBuilder;
+  using ScalarType = LargeStringScalar;
+  constexpr static bool is_parameter_free = true;
+  static inline std::shared_ptr<DataType> type_singleton() { return large_utf8(); }
+};
+
+template <>
 struct CTypeTraits<std::string> : public TypeTraits<StringType> {
   using ArrowType = StringType;
 };
@@ -271,10 +288,30 @@ struct CTypeTraits<char*> : public TypeTraits<StringType> {
 };
 
 template <>
+struct CTypeTraits<DayTimeIntervalType::DayMilliseconds>
+    : public TypeTraits<DayTimeIntervalType> {
+  using ArrowType = DayTimeIntervalType;
+};
+
+template <>
 struct TypeTraits<ListType> {
   using ArrayType = ListArray;
   using BuilderType = ListBuilder;
   using ScalarType = ListScalar;
+  using OffsetType = Int32Type;
+  using OffsetArrayType = Int32Array;
+  using OffsetBuilderType = Int32Builder;
+  constexpr static bool is_parameter_free = false;
+};
+
+template <>
+struct TypeTraits<LargeListType> {
+  using ArrayType = LargeListArray;
+  using BuilderType = LargeListBuilder;
+  using ScalarType = LargeListScalar;
+  using OffsetType = Int64Type;
+  using OffsetArrayType = Int64Array;
+  using OffsetBuilderType = Int64Builder;
   constexpr static bool is_parameter_free = false;
 };
 
@@ -330,6 +367,49 @@ struct TypeTraits<ExtensionType> {
   constexpr static bool is_parameter_free = false;
 };
 
+namespace internal {
+
+template <typename... Ts>
+struct make_void {
+  using type = void;
+};
+
+template <typename... Ts>
+using void_t = typename make_void<Ts...>::type;
+
+template <typename T, typename = void>
+struct is_dereferencable : public std::false_type {};
+
+template <typename T>
+struct is_dereferencable<T, void_t<decltype(*std::declval<T>())>>
+    : public std::true_type {};
+
+template <typename T, typename = void>
+struct is_optional_like : public std::false_type {};
+
+template <typename T>
+struct is_optional_like<T,
+                        typename std::enable_if<std::is_constructible<bool, T>::value &&
+                                                is_dereferencable<T>::value>::type>
+    : public std::true_type {};
+
+}  // namespace internal
+
+template <typename T, typename R = void>
+using enable_if_optional_like =
+    typename std::enable_if<internal::is_optional_like<T>::value, R>::type;
+
+template <typename Optional>
+struct CTypeTraits<Optional, enable_if_optional_like<Optional>> {
+  using OptionalInnerType =
+      typename std::decay<decltype(*std::declval<Optional>())>::type;
+  using ArrowType = typename CTypeTraits<OptionalInnerType>::ArrowType;
+
+  static std::shared_ptr<::arrow::DataType> type_singleton() {
+    return CTypeTraits<OptionalInnerType>::type_singleton();
+  }
+};
+
 //
 // Useful type predicates
 //
@@ -359,6 +439,12 @@ template <typename T>
 struct is_8bit_int {
   static constexpr bool value =
       (std::is_same<UInt8Type, T>::value || std::is_same<Int8Type, T>::value);
+};
+
+template <typename T>
+struct is_any_string_type {
+  static constexpr bool value =
+      std::is_same<StringType, T>::value || std::is_same<LargeStringType, T>::value;
 };
 
 template <typename T, typename R = void>
@@ -413,8 +499,16 @@ template <typename T, typename R = void>
 using enable_if_null = typename std::enable_if<std::is_same<NullType, T>::value, R>::type;
 
 template <typename T, typename R = void>
+using enable_if_base_binary =
+    typename std::enable_if<std::is_base_of<BaseBinaryType, T>::value, R>::type;
+
+template <typename T, typename R = void>
 using enable_if_binary =
     typename std::enable_if<std::is_base_of<BinaryType, T>::value, R>::type;
+
+template <typename T, typename R = void>
+using enable_if_large_binary =
+    typename std::enable_if<std::is_base_of<LargeBinaryType, T>::value, R>::type;
 
 template <typename T, typename R = void>
 using enable_if_boolean =
@@ -422,7 +516,7 @@ using enable_if_boolean =
 
 template <typename T, typename R = void>
 using enable_if_binary_like =
-    typename std::enable_if<std::is_base_of<BinaryType, T>::value ||
+    typename std::enable_if<std::is_base_of<BaseBinaryType, T>::value ||
                                 std::is_base_of<FixedSizeBinaryType, T>::value,
                             R>::type;
 
@@ -431,8 +525,16 @@ using enable_if_fixed_size_binary =
     typename std::enable_if<std::is_base_of<FixedSizeBinaryType, T>::value, R>::type;
 
 template <typename T, typename R = void>
+using enable_if_base_list =
+    typename std::enable_if<std::is_base_of<BaseListType, T>::value, R>::type;
+
+template <typename T, typename R = void>
 using enable_if_list =
     typename std::enable_if<std::is_base_of<ListType, T>::value, R>::type;
+
+template <typename T, typename R = void>
+using enable_if_large_list =
+    typename std::enable_if<std::is_base_of<LargeListType, T>::value, R>::type;
 
 template <typename T, typename R = void>
 using enable_if_fixed_size_list =
@@ -441,24 +543,18 @@ using enable_if_fixed_size_list =
 template <typename T, typename R = void>
 using enable_if_number = typename std::enable_if<is_number_type<T>::value, R>::type;
 
-namespace detail {
-
-// Not all type classes have a c_type
-template <typename T>
-struct as_void {
-  using type = void;
-};
+namespace internal {
 
 // The partial specialization will match if T has the ATTR_NAME member
-#define GET_ATTR(ATTR_NAME, DEFAULT)                                             \
-  template <typename T, typename Enable = void>                                  \
-  struct GetAttr_##ATTR_NAME {                                                   \
-    using type = DEFAULT;                                                        \
-  };                                                                             \
-                                                                                 \
-  template <typename T>                                                          \
-  struct GetAttr_##ATTR_NAME<T, typename as_void<typename T::ATTR_NAME>::type> { \
-    using type = typename T::ATTR_NAME;                                          \
+#define GET_ATTR(ATTR_NAME, DEFAULT)                             \
+  template <typename T, typename Enable = void>                  \
+  struct GetAttr_##ATTR_NAME {                                   \
+    using type = DEFAULT;                                        \
+  };                                                             \
+                                                                 \
+  template <typename T>                                          \
+  struct GetAttr_##ATTR_NAME<T, void_t<typename T::ATTR_NAME>> { \
+    using type = typename T::ATTR_NAME;                          \
   };
 
 GET_ATTR(c_type, void)
@@ -466,13 +562,13 @@ GET_ATTR(TypeClass, void)
 
 #undef GET_ATTR
 
-}  // namespace detail
+}  // namespace internal
 
-#define PRIMITIVE_TRAITS(T)                                                         \
-  using TypeClass =                                                                 \
-      typename std::conditional<std::is_base_of<DataType, T>::value, T,             \
-                                typename detail::GetAttr_TypeClass<T>::type>::type; \
-  using c_type = typename detail::GetAttr_c_type<TypeClass>::type
+#define PRIMITIVE_TRAITS(T)                                                           \
+  using TypeClass =                                                                   \
+      typename std::conditional<std::is_base_of<DataType, T>::value, T,               \
+                                typename internal::GetAttr_TypeClass<T>::type>::type; \
+  using c_type = typename internal::GetAttr_c_type<TypeClass>::type
 
 template <typename T>
 struct IsUnsignedInt {
@@ -574,6 +670,17 @@ static inline bool is_binary_like(Type::type type_id) {
   return false;
 }
 
+static inline bool is_large_binary_like(Type::type type_id) {
+  switch (type_id) {
+    case Type::LARGE_BINARY:
+    case Type::LARGE_STRING:
+      return true;
+    default:
+      break;
+  }
+  return false;
+}
+
 static inline bool is_dictionary(Type::type type_id) {
   return type_id == Type::DICTIONARY;
 }
@@ -594,5 +701,3 @@ static inline bool is_fixed_width(Type::type type_id) {
 }
 
 }  // namespace arrow
-
-#endif  // ARROW_TYPE_TRAITS_H
