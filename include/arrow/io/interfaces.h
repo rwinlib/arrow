@@ -15,23 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_IO_INTERFACES_H
-#define ARROW_IO_INTERFACES_H
+#pragma once
 
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "arrow/type_fwd.h"
 #include "arrow/util/macros.h"
 #include "arrow/util/string_view.h"
 #include "arrow/util/visibility.h"
 
 namespace arrow {
-
-class Buffer;
-class Status;
-
 namespace io {
 
 struct FileMode {
@@ -42,12 +38,14 @@ struct ObjectType {
   enum type { FILE, DIRECTORY };
 };
 
+/// DEPRECATED.  Use the FileSystem API in arrow::fs instead.
 struct ARROW_EXPORT FileStatistics {
   /// Size of file, -1 if finding length is unsupported
   int64_t size;
   ObjectType::type kind;
 };
 
+/// DEPRECATED.  Use the FileSystem API in arrow::fs instead.
 class ARROW_EXPORT FileSystem {
  public:
   virtual ~FileSystem() = default;
@@ -88,12 +86,16 @@ class ARROW_EXPORT FileInterface {
   virtual Status Abort();
 
   /// \brief Return the position in this stream
-  virtual Status Tell(int64_t* position) const = 0;
+  virtual Result<int64_t> Tell() const = 0;
 
   /// \brief Return whether the stream is closed
   virtual bool closed() const = 0;
 
   FileMode::type mode() const { return mode_; }
+
+  // Deprecated APIs
+  ARROW_DEPRECATED("Use Result-returning overload")
+  Status Tell(int64_t* position) const;
 
  protected:
   FileInterface() : mode_(FileMode::READ) {}
@@ -139,10 +141,28 @@ class ARROW_EXPORT Readable {
  public:
   virtual ~Readable() = default;
 
-  virtual Status Read(int64_t nbytes, int64_t* bytes_read, void* out) = 0;
+  /// \brief Read data from current file position.
+  ///
+  /// Read at most `nbytes` from the current file position into `out`.
+  /// The number of bytes read is returned.
+  virtual Result<int64_t> Read(int64_t nbytes, void* out) = 0;
 
-  // Does not copy if not necessary
-  virtual Status Read(int64_t nbytes, std::shared_ptr<Buffer>* out) = 0;
+  /// \brief Read data from current file position.
+  ///
+  /// Read at most `nbytes` from the current file position. Less bytes may
+  /// be read if EOF is reached. This method updates the current file position.
+  ///
+  /// In some cases (e.g. a memory-mapped file), this method may avoid a
+  /// memory copy.
+  virtual Result<std::shared_ptr<Buffer>> Read(int64_t nbytes) = 0;
+
+  // Deprecated APIs
+
+  ARROW_DEPRECATED("Use Result-returning overload")
+  Status Read(int64_t nbytes, int64_t* bytes_read, void* out);
+
+  ARROW_DEPRECATED("Use Result-returning overload")
+  Status Read(int64_t nbytes, std::shared_ptr<Buffer>* out);
 };
 
 class ARROW_EXPORT OutputStream : virtual public FileInterface, public Writable {
@@ -166,12 +186,17 @@ class ARROW_EXPORT InputStream : virtual public FileInterface, virtual public Re
   /// May return NotImplemented on streams that don't support it.
   ///
   /// \param[in] nbytes the maximum number of bytes to see
-  /// \param[out] out the returned arrow::util::string_view
-  /// \return Status
-  virtual Status Peek(int64_t nbytes, util::string_view* out);
+  virtual Result<util::string_view> Peek(int64_t nbytes);
 
   /// \brief Return true if InputStream is capable of zero copy Buffer reads
+  ///
+  /// Zero copy reads imply the use of Buffer-returning Read() overloads.
   virtual bool supports_zero_copy() const;
+
+  // Deprecated APIs
+
+  ARROW_DEPRECATED("Use Result-returning overload")
+  Status Peek(int64_t nbytes, util::string_view* out);
 
  protected:
   InputStream() = default;
@@ -192,30 +217,46 @@ class ARROW_EXPORT RandomAccessFile : public InputStream, public Seekable {
   static std::shared_ptr<InputStream> GetStream(std::shared_ptr<RandomAccessFile> file,
                                                 int64_t file_offset, int64_t nbytes);
 
-  virtual Status GetSize(int64_t* size) = 0;
+  /// Return the total file size in bytes.
+  virtual Result<int64_t> GetSize() = 0;
 
-  /// \brief Read nbytes at position, provide default implementations using
-  /// Read(...), but can be overridden. The default implementation is
-  /// thread-safe. It is unspecified whether this method updates the file
-  /// position or not.
+  /// \brief Read data from given file position.
+  ///
+  /// At most `nbytes` bytes are read.  The number of bytes read is returned
+  /// (it can be less than `nbytes` if EOF is reached).
+  ///
+  /// This method can be safely called from multiple threads concurrently.
+  /// It is unspecified whether this method updates the file position or not.
+  ///
+  /// The default RandomAccessFile-provided implementation uses Seek() and Read(),
+  /// but subclasses may override it with a more efficient implementation
+  /// that doesn't depend on implicit file positioning.
   ///
   /// \param[in] position Where to read bytes from
   /// \param[in] nbytes The number of bytes to read
-  /// \param[out] bytes_read The number of bytes read
   /// \param[out] out The buffer to read bytes into
-  /// \return Status
-  virtual Status ReadAt(int64_t position, int64_t nbytes, int64_t* bytes_read, void* out);
+  /// \return The number of bytes read, or an error
+  virtual Result<int64_t> ReadAt(int64_t position, int64_t nbytes, void* out);
 
-  /// \brief Read nbytes at position, provide default implementations using
-  /// Read(...), but can be overridden. The default implementation is
-  /// thread-safe. It is unspecified whether this method updates the file
-  /// position or not.
+  /// \brief Read data from given file position.
+  ///
+  /// At most `nbytes` bytes are read, but it can be less if EOF is reached.
   ///
   /// \param[in] position Where to read bytes from
   /// \param[in] nbytes The number of bytes to read
-  /// \param[out] out The buffer to read bytes into. The number of bytes read can be
-  /// retrieved by calling Buffer::size().
-  virtual Status ReadAt(int64_t position, int64_t nbytes, std::shared_ptr<Buffer>* out);
+  /// \return A buffer containing the bytes read, or an error
+  virtual Result<std::shared_ptr<Buffer>> ReadAt(int64_t position, int64_t nbytes);
+
+  // Deprecated APIs
+
+  ARROW_DEPRECATED("Use Result-returning overload")
+  Status ReadAt(int64_t position, int64_t nbytes, int64_t* bytes_read, void* out);
+
+  ARROW_DEPRECATED("Use Result-returning overload")
+  Status ReadAt(int64_t position, int64_t nbytes, std::shared_ptr<Buffer>* out);
+
+  ARROW_DEPRECATED("Use Result-returning overload")
+  Status GetSize(int64_t* size);
 
  protected:
   RandomAccessFile();
@@ -238,7 +279,15 @@ class ARROW_EXPORT ReadWriteFileInterface : public RandomAccessFile, public Writ
   ReadWriteFileInterface() { RandomAccessFile::set_mode(FileMode::READWRITE); }
 };
 
+/// \brief Return an iterator on an input stream
+///
+/// The iterator yields a fixed-size block on each Next() call, except the
+/// last block in the stream which may be smaller.
+/// Once the end of stream is reached, Next() returns nullptr
+/// (unlike InputStream::Read() which returns an empty buffer).
+ARROW_EXPORT
+Result<Iterator<std::shared_ptr<Buffer>>> MakeInputStreamIterator(
+    std::shared_ptr<InputStream> stream, int64_t block_size);
+
 }  // namespace io
 }  // namespace arrow
-
-#endif  // ARROW_IO_INTERFACES_H

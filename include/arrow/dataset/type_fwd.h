@@ -35,53 +35,57 @@ namespace fs {
 
 class FileSystem;
 
+struct FileStats;
+using FileStatsVector = std::vector<FileStats>;
+
 }  // namespace fs
 
 namespace dataset {
 
 class Dataset;
-class DataFragment;
-class DataSource;
-struct DataSelector;
-using DataFragmentIterator = Iterator<std::shared_ptr<DataFragment>>;
-using DataFragmentVector = std::vector<std::shared_ptr<DataFragment>>;
 
-struct DiscoveryOptions;
+class Fragment;
+using FragmentIterator = Iterator<std::shared_ptr<Fragment>>;
+using FragmentVector = std::vector<std::shared_ptr<Fragment>>;
 
-class FileBasedDataFragment;
+class Source;
+using SourceVector = std::vector<std::shared_ptr<Source>>;
+
+class SourceFactory;
+
 class FileFormat;
-class FileScanOptions;
-class FileWriteOptions;
 
 class Expression;
-class Filter;
-using FilterVector = std::vector<std::shared_ptr<Filter>>;
+using ExpressionVector = std::vector<std::shared_ptr<Expression>>;
 
-class Expression;
 class ComparisonExpression;
+class InExpression;
+class IsValidExpression;
 class AndExpression;
 class OrExpression;
 class NotExpression;
+class CastExpression;
 class ScalarExpression;
 class FieldReferenceExpression;
-using ExpressionVector = std::vector<std::shared_ptr<Expression>>;
+class ExpressionEvaluator;
 
-class Partition;
-class PartitionKey;
-class PartitionScheme;
-using PartitionVector = std::vector<std::shared_ptr<Partition>>;
-using PartitionIterator = Iterator<std::shared_ptr<Partition>>;
+class Partitioning;
+class PartitioningFactory;
+class PartitioningOrFactory;
 
 struct ScanContext;
-class ScanOptions;
-class Scanner;
-class ScannerBuilder;
-class ScanTask;
-using ScanTaskIterator = Iterator<std::unique_ptr<ScanTask>>;
 
-class DatasetWriter;
-class WriteContext;
-class WriteOptions;
+class ScanOptions;
+
+class Scanner;
+
+class ScannerBuilder;
+
+class ScanTask;
+using ScanTaskVector = std::vector<std::shared_ptr<ScanTask>>;
+using ScanTaskIterator = Iterator<std::shared_ptr<ScanTask>>;
+
+class RecordBatchProjector;
 
 }  // namespace dataset
 }  // namespace arrow

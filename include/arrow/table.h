@@ -15,24 +15,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_TABLE_H
-#define ARROW_TABLE_H
+#pragma once
 
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "arrow/array.h"
 #include "arrow/record_batch.h"
 #include "arrow/type.h"
+#include "arrow/type_fwd.h"
 #include "arrow/util/macros.h"
 #include "arrow/util/visibility.h"
 
 namespace arrow {
 
-class MemoryPool;
-class Status;
+using ArrayVector = std::vector<std::shared_ptr<Array>>;
 
 /// \class ChunkedArray
 /// \brief A data structure managing a list of primitive Arrow arrays logically
@@ -104,8 +102,23 @@ class ARROW_EXPORT ChunkedArray {
   /// \brief Determine if two chunked arrays are equal.
   bool Equals(const std::shared_ptr<ChunkedArray>& other) const;
 
-  /// \brief Check that all chunks have the same data type
+  /// \brief Perform cheap validation checks to determine obvious inconsistencies
+  /// within the chunk array's internal data.
+  ///
+  /// This is O(k*m) where k is the number of array descendents,
+  /// and m is the number of chunks.
+  ///
+  /// \return Status
   Status Validate() const;
+
+  /// \brief Perform extensive validation checks to determine inconsistencies
+  /// within the chunk array's internal data.
+  ///
+  /// This is O(k*n) where k is the number of array descendents,
+  /// and n is the length in elements.
+  ///
+  /// \return Status
+  Status ValidateFull() const;
 
  protected:
   ArrayVector chunks_;
@@ -171,14 +184,20 @@ class ARROW_EXPORT Table {
   static Status FromChunkedStructArray(const std::shared_ptr<ChunkedArray>& array,
                                        std::shared_ptr<Table>* table);
 
-  /// Return the table schema
+  /// \brief Return the table schema
   std::shared_ptr<Schema> schema() const { return schema_; }
 
-  /// Return a column by index
+  /// \brief Return a column by index
   virtual std::shared_ptr<ChunkedArray> column(int i) const = 0;
+
+  /// \brief Return vector of all columns for table
+  std::vector<std::shared_ptr<ChunkedArray>> columns() const;
 
   /// Return a column's field by index
   std::shared_ptr<Field> field(int i) const { return schema_->field(i); }
+
+  /// \brief Return vector of all fields for table
+  std::vector<std::shared_ptr<Field>> fields() const;
 
   /// \brief Construct a zero-copy slice of the table with the
   /// indicated offset and length
@@ -237,8 +256,23 @@ class ARROW_EXPORT Table {
   /// \param[out] out The returned table
   virtual Status Flatten(MemoryPool* pool, std::shared_ptr<Table>* out) const = 0;
 
-  /// \brief Perform any checks to validate the input arguments
+  /// \brief Perform cheap validation checks to determine obvious inconsistencies
+  /// within the table's schema and internal data.
+  ///
+  /// This is O(k*m) where k is the total number of field descendents,
+  /// and m is the number of chunks.
+  ///
+  /// \return Status
   virtual Status Validate() const = 0;
+
+  /// \brief Perform extensive validation checks to determine inconsistencies
+  /// within the table's schema and internal data.
+  ///
+  /// This is O(k*n) where k is the total number of field descendents,
+  /// and n is the number of rows.
+  ///
+  /// \return Status
+  virtual Status ValidateFull() const = 0;
 
   /// \brief Return the number of columns in the table
   int num_columns() const { return schema_->num_fields(); }
@@ -299,15 +333,50 @@ class ARROW_EXPORT TableBatchReader : public RecordBatchReader {
   int64_t max_chunksize_;
 };
 
-/// \brief Construct table from multiple input tables.
+/// \defgroup concat-tables ConcatenateTables function.
 ///
-/// The tables are concatenated vertically.  Therefore, all tables should
-/// have the same schema.  Each column in the output table is the result
-/// of concatenating the corresponding columns in all input tables.
+/// ConcatenateTables function.
+/// @{
+
+/// \brief Controls the behavior of ConcatenateTables().
+struct ARROW_EXPORT ConcatenateTablesOptions {
+  /// If true, the schemas of the tables will be first unified with fields of
+  /// the same name being merged, according to `field_merge_options`, then each
+  /// table will be promoted to the unified schema before being concatenated.
+  /// Otherwise, all tables should have the same schema. Each column in the output table
+  /// is the result of concatenating the corresponding columns in all input tables.
+  bool unify_schemas = false;
+
+  Field::MergeOptions field_merge_options = Field::MergeOptions::Defaults();
+
+  static ConcatenateTablesOptions Defaults() { return ConcatenateTablesOptions(); }
+};
+
+/// \brief Construct table from multiple input tables.
 ARROW_EXPORT
-Status ConcatenateTables(const std::vector<std::shared_ptr<Table>>& tables,
-                         std::shared_ptr<Table>* table);
+Result<std::shared_ptr<Table>> ConcatenateTables(
+    const std::vector<std::shared_ptr<Table>>& tables,
+    ConcatenateTablesOptions options = ConcatenateTablesOptions::Defaults(),
+    MemoryPool* memory_pool = default_memory_pool());
+
+/// \brief Promotes a table to conform to the given schema.
+///
+/// If a field in the schema does not have a corresponding column in the
+/// table, a column of nulls will be added to the resulting table.
+/// If the corresponding column is of type Null, it will be promoted to
+/// the type specified by schema, with null values filled.
+/// Returns an error:
+/// - if the corresponding column's type is not compatible with the
+///   schema.
+/// - if there is a column in the table that does not exist in the schema.
+///
+/// \param[in] table the input Table
+/// \param[in] schema the target schema to promote to
+/// \param[in] pool The memory pool to be used if null-filled arrays need to
+/// be created.
+ARROW_EXPORT
+Result<std::shared_ptr<Table>> PromoteTableToSchema(
+    const std::shared_ptr<Table>& table, const std::shared_ptr<Schema>& schema,
+    MemoryPool* pool = default_memory_pool());
 
 }  // namespace arrow
-
-#endif  // ARROW_TABLE_H

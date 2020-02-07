@@ -30,7 +30,13 @@
   void operator=(const TypeName&) = delete
 #endif
 
-#define ARROW_UNUSED(x) (void)x
+#ifndef ARROW_DEFAULT_MOVE_AND_ASSIGN
+#define ARROW_DEFAULT_MOVE_AND_ASSIGN(TypeName) \
+  TypeName(TypeName&&) = default;               \
+  TypeName& operator=(TypeName&&) = default
+#endif
+
+#define ARROW_UNUSED(x) (void)(x)
 #define ARROW_ARG_UNUSED(x)
 //
 // GCC can be told that a certain branch is not likely to be taken (for

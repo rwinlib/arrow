@@ -38,7 +38,7 @@
 #include "arrow/type_traits.h"
 #include "arrow/util/bit_util.h"
 #include "arrow/util/checked_cast.h"
-#include "arrow/util/hash_util.h"
+#include "arrow/util/logging.h"
 #include "arrow/util/macros.h"
 #include "arrow/util/string_view.h"
 
@@ -55,15 +55,10 @@ namespace internal {
 typedef uint64_t hash_t;
 
 // Notes about the choice of a hash function.
-// - xxHash64 is extremely fast on large enough data
-// - for small- to medium-sized data, there are better choices
-//   (see comprehensive benchmarks results at
-//    https://aras-p.info/blog/2016/08/09/More-Hash-Function-Tests/)
-// - for very small fixed-size data (<= 16 bytes, e.g. Decimal128), it is
-//   beneficial to define specialized hash functions
-// - while xxHash and others have good statistical properties, we can relax those
-//   a bit if it helps performance (especially if the hash table implementation
-//   has a good collision resolution strategy)
+// - XXH3 is extremely fast on most data sizes, from small to huge;
+//   faster even than HW CRC-based hashing schemes
+// - our custom hash function for tiny values (< 16 bytes) is still
+//   significantly faster (~30%), at least on this machine and compiler
 
 template <uint64_t AlgNum>
 inline hash_t ComputeStringHash(const void* data, int64_t length);
@@ -86,8 +81,7 @@ template <typename Scalar, uint64_t AlgNum = 0, typename Enable = void>
 struct ScalarHelper : public ScalarHelperBase<Scalar, AlgNum> {};
 
 template <typename Scalar, uint64_t AlgNum>
-struct ScalarHelper<Scalar, AlgNum,
-                    typename std::enable_if<std::is_integral<Scalar>::value>::type>
+struct ScalarHelper<Scalar, AlgNum, enable_if_t<std::is_integral<Scalar>::value>>
     : public ScalarHelperBase<Scalar, AlgNum> {
   // ScalarHelper specialization for integers
 
@@ -108,9 +102,8 @@ struct ScalarHelper<Scalar, AlgNum,
 };
 
 template <typename Scalar, uint64_t AlgNum>
-struct ScalarHelper<
-    Scalar, AlgNum,
-    typename std::enable_if<std::is_same<util::string_view, Scalar>::value>::type>
+struct ScalarHelper<Scalar, AlgNum,
+                    enable_if_t<std::is_same<util::string_view, Scalar>::value>>
     : public ScalarHelperBase<Scalar, AlgNum> {
   // ScalarHelper specialization for util::string_view
 
@@ -120,8 +113,7 @@ struct ScalarHelper<
 };
 
 template <typename Scalar, uint64_t AlgNum>
-struct ScalarHelper<Scalar, AlgNum,
-                    typename std::enable_if<std::is_floating_point<Scalar>::value>::type>
+struct ScalarHelper<Scalar, AlgNum, enable_if_t<std::is_floating_point<Scalar>::value>>
     : public ScalarHelperBase<Scalar, AlgNum> {
   // ScalarHelper specialization for reals
 
@@ -499,8 +491,7 @@ struct SmallScalarTraits<bool> {
 };
 
 template <typename Scalar>
-struct SmallScalarTraits<Scalar,
-                         typename std::enable_if<std::is_integral<Scalar>::value>::type> {
+struct SmallScalarTraits<Scalar, enable_if_t<std::is_integral<Scalar>::value>> {
   using Unsigned = typename std::make_unsigned<Scalar>::type;
 
   static constexpr int32_t cardinality = 1U + std::numeric_limits<Unsigned>::max();
@@ -833,19 +824,13 @@ struct HashTraits<T, enable_if_8bit_int<T>> {
 };
 
 template <typename T>
-struct HashTraits<
-    T, typename std::enable_if<has_c_type<T>::value && !is_8bit_int<T>::value>::type> {
+struct HashTraits<T, enable_if_t<has_c_type<T>::value && !is_8bit_int<T>::value>> {
   using c_type = typename T::c_type;
   using MemoTableType = ScalarMemoTable<c_type, HashTable>;
 };
 
 template <typename T>
-struct HashTraits<T, enable_if_binary<T>> {
-  using MemoTableType = BinaryMemoTable;
-};
-
-template <typename T>
-struct HashTraits<T, enable_if_fixed_size_binary<T>> {
+struct HashTraits<T, enable_if_has_string_view<T>> {
   using MemoTableType = BinaryMemoTable;
 };
 
@@ -862,7 +847,8 @@ static inline Status ComputeNullBitmap(MemoryPool* pool, const MemoTableType& me
   if (null_index != kKeyNotFound && null_index >= start_offset) {
     null_index -= start_offset;
     *null_count = 1;
-    RETURN_NOT_OK(internal::BitmapAllButOne(pool, dict_length, null_index, null_bitmap));
+    ARROW_ASSIGN_OR_RAISE(*null_bitmap,
+                          internal::BitmapAllButOne(pool, dict_length, null_index));
   }
 
   return Status::OK();

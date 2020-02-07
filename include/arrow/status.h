@@ -12,8 +12,7 @@
 
 // Adapted from Apache Kudu, TensorFlow
 
-#ifndef ARROW_STATUS_H_
-#define ARROW_STATUS_H_
+#pragma once
 
 #include <cstring>
 #include <iosfwd>
@@ -21,6 +20,7 @@
 #include <string>
 #include <utility>
 
+#include "arrow/util/compare.h"
 #include "arrow/util/macros.h"
 #include "arrow/util/string_builder.h"
 #include "arrow/util/visibility.h"
@@ -52,19 +52,19 @@
   ARROW_RETURN_IF_(condition, status, ARROW_STRINGIFY(status))
 
 /// \brief Propagate any non-successful Status to the caller
-#define ARROW_RETURN_NOT_OK(status)                            \
-  do {                                                         \
-    ::arrow::Status __s = (status);                            \
-    ARROW_RETURN_IF_(!__s.ok(), __s, ARROW_STRINGIFY(status)); \
+#define ARROW_RETURN_NOT_OK(status)                                   \
+  do {                                                                \
+    ::arrow::Status __s = ::arrow::internal::GenericToStatus(status); \
+    ARROW_RETURN_IF_(!__s.ok(), __s, ARROW_STRINGIFY(status));        \
   } while (false)
 
-#define RETURN_NOT_OK_ELSE(s, else_) \
-  do {                               \
-    ::arrow::Status _s = (s);        \
-    if (!_s.ok()) {                  \
-      else_;                         \
-      return _s;                     \
-    }                                \
+#define RETURN_NOT_OK_ELSE(s, else_)                            \
+  do {                                                          \
+    ::arrow::Status _s = ::arrow::internal::GenericToStatus(s); \
+    if (!_s.ok()) {                                             \
+      else_;                                                    \
+      return _s;                                                \
+    }                                                           \
   } while (false)
 
 // This is an internal-use macro and should not be used in public headers.
@@ -110,6 +110,10 @@ class ARROW_EXPORT StatusDetail {
   virtual const char* type_id() const = 0;
   /// \brief Produce a human-readable description of this status.
   virtual std::string ToString() const = 0;
+
+  bool operator==(const StatusDetail& other) const noexcept {
+    return std::string(type_id()) == other.type_id() && ToString() == other.ToString();
+  }
 };
 
 /// \brief Status outcome object (success or error)
@@ -120,7 +124,8 @@ class ARROW_EXPORT StatusDetail {
 ///
 /// Additionally, if an error occurred, a specific error message is generally
 /// attached.
-class ARROW_EXPORT Status {
+class ARROW_EXPORT Status : public util::EqualityComparable<Status>,
+                            public util::ToStringOstreamable<Status> {
  public:
   // Create a success status.
   Status() noexcept : state_(NULLPTR) {}
@@ -144,6 +149,8 @@ class ARROW_EXPORT Status {
   inline Status(Status&& s) noexcept;
   inline Status& operator=(Status&& s) noexcept;
 
+  inline bool Equals(const Status& s) const;
+
   // AND the statuses.
   inline Status operator&(const Status& s) const noexcept;
   inline Status operator&(Status&& s) const noexcept;
@@ -153,107 +160,103 @@ class ARROW_EXPORT Status {
   /// Return a success status
   static Status OK() { return Status(); }
 
-  /// Return a success status with a specific message
   template <typename... Args>
-  static Status OK(Args&&... args) {
-    return Status(StatusCode::OK, util::StringBuilder(std::forward<Args>(args)...));
+  static Status FromArgs(StatusCode code, Args&&... args) {
+    return Status(code, util::StringBuilder(std::forward<Args>(args)...));
+  }
+
+  template <typename... Args>
+  static Status FromDetailAndArgs(StatusCode code, std::shared_ptr<StatusDetail> detail,
+                                  Args&&... args) {
+    return Status(code, util::StringBuilder(std::forward<Args>(args)...),
+                  std::move(detail));
   }
 
   /// Return an error status for out-of-memory conditions
   template <typename... Args>
   static Status OutOfMemory(Args&&... args) {
-    return Status(StatusCode::OutOfMemory,
-                  util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::OutOfMemory, std::forward<Args>(args)...);
   }
 
   /// Return an error status for failed key lookups (e.g. column name in a table)
   template <typename... Args>
   static Status KeyError(Args&&... args) {
-    return Status(StatusCode::KeyError, util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::KeyError, std::forward<Args>(args)...);
   }
 
   /// Return an error status for type errors (such as mismatching data types)
   template <typename... Args>
   static Status TypeError(Args&&... args) {
-    return Status(StatusCode::TypeError,
-                  util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::TypeError, std::forward<Args>(args)...);
   }
 
   /// Return an error status for unknown errors
   template <typename... Args>
   static Status UnknownError(Args&&... args) {
-    return Status(StatusCode::UnknownError,
-                  util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::UnknownError, std::forward<Args>(args)...);
   }
 
   /// Return an error status when an operation or a combination of operation and
   /// data types is unimplemented
   template <typename... Args>
   static Status NotImplemented(Args&&... args) {
-    return Status(StatusCode::NotImplemented,
-                  util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::NotImplemented, std::forward<Args>(args)...);
   }
 
   /// Return an error status for invalid data (for example a string that fails parsing)
   template <typename... Args>
   static Status Invalid(Args&&... args) {
-    return Status(StatusCode::Invalid, util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::Invalid, std::forward<Args>(args)...);
   }
 
   /// Return an error status when an index is out of bounds
   template <typename... Args>
   static Status IndexError(Args&&... args) {
-    return Status(StatusCode::IndexError,
-                  util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::IndexError, std::forward<Args>(args)...);
   }
 
   /// Return an error status when a container's capacity would exceed its limits
   template <typename... Args>
   static Status CapacityError(Args&&... args) {
-    return Status(StatusCode::CapacityError,
-                  util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::CapacityError, std::forward<Args>(args)...);
   }
 
   /// Return an error status when some IO-related operation failed
   template <typename... Args>
   static Status IOError(Args&&... args) {
-    return Status(StatusCode::IOError, util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::IOError, std::forward<Args>(args)...);
   }
 
   /// Return an error status when some (de)serialization operation failed
   template <typename... Args>
   static Status SerializationError(Args&&... args) {
-    return Status(StatusCode::SerializationError,
-                  util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::SerializationError, std::forward<Args>(args)...);
   }
 
   template <typename... Args>
   static Status RError(Args&&... args) {
-    return Status(StatusCode::RError, util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::RError, std::forward<Args>(args)...);
   }
 
   template <typename... Args>
   static Status CodeGenError(Args&&... args) {
-    return Status(StatusCode::CodeGenError,
-                  util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::CodeGenError, std::forward<Args>(args)...);
   }
 
   template <typename... Args>
   static Status ExpressionValidationError(Args&&... args) {
-    return Status(StatusCode::ExpressionValidationError,
-                  util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::ExpressionValidationError,
+                            std::forward<Args>(args)...);
   }
 
   template <typename... Args>
   static Status ExecutionError(Args&&... args) {
-    return Status(StatusCode::ExecutionError,
-                  util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::ExecutionError, std::forward<Args>(args)...);
   }
 
   template <typename... Args>
   static Status AlreadyExists(Args&&... args) {
-    return Status(StatusCode::AlreadyExists,
-                  util::StringBuilder(std::forward<Args>(args)...));
+    return Status::FromArgs(StatusCode::AlreadyExists, std::forward<Args>(args)...);
   }
 
   /// Return true iff the status indicates success.
@@ -318,8 +321,9 @@ class ARROW_EXPORT Status {
 
   /// \brief Return a new Status with changed message, copying the
   /// existing status code and detail.
-  Status WithMessage(std::string message) const {
-    return Status(code(), std::move(message), detail());
+  template <typename... Args>
+  Status WithMessage(Args&&... args) const {
+    return FromArgs(code(), std::forward<Args>(args)...).WithDetail(detail());
   }
 
   [[noreturn]] void Abort() const;
@@ -347,11 +351,6 @@ class ARROW_EXPORT Status {
   inline void MoveFrom(Status& s);
 };
 
-static inline std::ostream& operator<<(std::ostream& os, const Status& x) {
-  os << x.ToString();
-  return os;
-}
-
 void Status::MoveFrom(Status& s) {
   delete state_;
   state_ = s.state_;
@@ -375,6 +374,22 @@ Status::Status(Status&& s) noexcept : state_(s.state_) { s.state_ = NULLPTR; }
 Status& Status::operator=(Status&& s) noexcept {
   MoveFrom(s);
   return *this;
+}
+
+bool Status::Equals(const Status& s) const {
+  if (state_ == s.state_) {
+    return true;
+  }
+
+  if (ok() || s.ok()) {
+    return false;
+  }
+
+  if (detail() != s.detail() && !(*detail() == *s.detail())) {
+    return false;
+  }
+
+  return code() == s.code() && message() == s.message();
 }
 
 /// \cond FALSE
@@ -411,6 +426,12 @@ Status& Status::operator&=(Status&& s) noexcept {
 }
 /// \endcond
 
-}  // namespace arrow
+namespace internal {
 
-#endif  // ARROW_STATUS_H_
+// Extract Status from Status or Result<T>
+// Useful for the status check macros such as RETURN_NOT_OK.
+inline Status GenericToStatus(const Status& st) { return st; }
+
+}  // namespace internal
+
+}  // namespace arrow

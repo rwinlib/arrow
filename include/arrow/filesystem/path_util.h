@@ -21,7 +21,8 @@
 #include <utility>
 #include <vector>
 
-#include "arrow/status.h"
+#include "arrow/type_fwd.h"
+#include "arrow/util/optional.h"
 #include "arrow/util/string_view.h"
 
 namespace arrow {
@@ -54,11 +55,37 @@ Status ValidateAbstractPathParts(const std::vector<std::string>& parts);
 ARROW_EXPORT
 std::string ConcatAbstractPath(const std::string& base, const std::string& stem);
 
+// Make path relative to base, if it starts with base.  Otherwise error out.
 ARROW_EXPORT
-std::string EnsureTrailingSlash(const std::string& s);
+Result<std::string> MakeAbstractPathRelative(const std::string& base,
+                                             const std::string& path);
+
+ARROW_EXPORT
+std::string EnsureLeadingSlash(util::string_view s);
+
+ARROW_EXPORT
+util::string_view RemoveLeadingSlash(util::string_view s);
+
+ARROW_EXPORT
+std::string EnsureTrailingSlash(util::string_view s);
 
 ARROW_EXPORT
 util::string_view RemoveTrailingSlash(util::string_view s);
+
+ARROW_EXPORT
+bool IsAncestorOf(util::string_view ancestor, util::string_view descendant);
+
+ARROW_EXPORT
+util::optional<util::string_view> RemoveAncestor(util::string_view ancestor,
+                                                 util::string_view descendant);
+
+/// Return a vector of ancestors between a base path and a descendant.
+/// For example,
+///
+/// AncestorsFromBasePath("a/b", "a/b/c/d/e") -> ["a/b/c", "a/b/c/d"]
+ARROW_EXPORT
+std::vector<std::string> AncestorsFromBasePath(util::string_view base_path,
+                                               util::string_view descendant);
 
 // Join the components of an abstract path.
 template <class StringIt>
@@ -77,6 +104,15 @@ template <class StringRange>
 std::string JoinAbstractPath(const StringRange& range) {
   return JoinAbstractPath(range.begin(), range.end());
 }
+
+/// Convert slashes to backslashes, on all platforms.  Mostly useful for testing.
+ARROW_EXPORT
+std::string ToBackslashes(util::string_view s);
+
+/// Ensure a local path is abstract, by converting backslashes to regular slashes
+/// on Windows.  Return the path unchanged on other systems.
+ARROW_EXPORT
+std::string ToSlashes(util::string_view s);
 
 }  // namespace internal
 }  // namespace fs

@@ -19,42 +19,79 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "arrow/compute/context.h"
+#include "arrow/dataset/dataset.h"
+#include "arrow/dataset/projector.h"
 #include "arrow/dataset/type_fwd.h"
 #include "arrow/dataset/visibility.h"
 #include "arrow/memory_pool.h"
+#include "arrow/util/thread_pool.h"
 
 namespace arrow {
+
+class Table;
+
+namespace internal {
+class TaskGroup;
+};
+
 namespace dataset {
 
 /// \brief Shared state for a Scan operation
 struct ARROW_DS_EXPORT ScanContext {
   MemoryPool* pool = arrow::default_memory_pool();
+  internal::ThreadPool* thread_pool = arrow::internal::GetCpuThreadPool();
 };
 
 class ARROW_DS_EXPORT ScanOptions {
  public:
-  ScanOptions() = default;
-
-  ScanOptions(std::shared_ptr<DataSelector> selector, std::shared_ptr<Schema> schema,
-              std::vector<std::shared_ptr<FileScanOptions>> options = {})
-      : selector(std::move(selector)), schema(std::move(schema)) {}
-
   virtual ~ScanOptions() = default;
 
-  MemoryPool* pool() const { return pool_; }
+  static std::shared_ptr<ScanOptions> Make(std::shared_ptr<Schema> schema) {
+    return std::shared_ptr<ScanOptions>(new ScanOptions(std::move(schema)));
+  }
 
-  // Filters
-  std::shared_ptr<DataSelector> selector;
+  // Construct a copy of these options with a different schema.
+  std::shared_ptr<ScanOptions> ReplaceSchema(std::shared_ptr<Schema> schema) const;
+
+  // Indicate if the Scanner should make use of the ThreadPool found in the
+  // ScanContext.
+  bool use_threads = false;
+
+  // Filter
+  std::shared_ptr<Expression> filter;
+
+  // Evaluator for Filter
+  std::shared_ptr<ExpressionEvaluator> evaluator;
 
   // Schema to which record batches will be reconciled
-  std::shared_ptr<Schema> schema;
+  const std::shared_ptr<Schema>& schema() const { return projector.schema(); }
 
-  MemoryPool* pool_ = default_memory_pool();
+  // Projector for reconciling the final RecordBatch to the requested schema.
+  RecordBatchProjector projector;
 
-  std::vector<std::shared_ptr<FileScanOptions>> options;
+  // Return a vector of fields that requires materialization.
+  //
+  // This is usually the union of the fields referenced in the projection and the
+  // filter expression. Examples:
+  //
+  // - `SELECT a, b WHERE a < 2 && c > 1` => ["a", "b", "a", "c"]
+  // - `SELECT a + b < 3 WHERE a > 1` => ["a", "b"]
+  //
+  // This is needed for expression where a field may not be directly
+  // used in the final projection but is still required to evaluate the
+  // expression.
+  //
+  // This is used by Fragments implementation to apply the column
+  // sub-selection optimization.
+  std::vector<std::string> MaterializedFields() const;
+
+ private:
+  explicit ScanOptions(std::shared_ptr<Schema> schema);
 };
 
 /// \brief Read record batches from a range of a single data fragment. A
@@ -63,28 +100,45 @@ class ARROW_DS_EXPORT ScanOptions {
 class ARROW_DS_EXPORT ScanTask {
  public:
   /// \brief Iterate through sequence of materialized record batches
-  /// resulting from the Scan. Execution semantics encapsulated in the
+  /// resulting from the Scan. Execution semantics are encapsulated in the
   /// particular ScanTask implementation
-  virtual RecordBatchIterator Scan() = 0;
+  virtual Result<RecordBatchIterator> Execute() = 0;
 
   virtual ~ScanTask() = default;
+
+  const std::shared_ptr<ScanOptions>& options() const { return options_; }
+  const std::shared_ptr<ScanContext>& context() const { return context_; }
+
+ protected:
+  ScanTask(std::shared_ptr<ScanOptions> options, std::shared_ptr<ScanContext> context)
+      : options_(std::move(options)), context_(std::move(context)) {}
+
+  std::shared_ptr<ScanOptions> options_;
+  std::shared_ptr<ScanContext> context_;
 };
 
 /// \brief A trivial ScanTask that yields the RecordBatch of an array.
-class ARROW_DS_EXPORT SimpleScanTask : public ScanTask {
+class ARROW_DS_EXPORT InMemoryScanTask : public ScanTask {
  public:
-  explicit SimpleScanTask(std::vector<std::shared_ptr<RecordBatch>> record_batches)
-      : record_batches_(std::move(record_batches)) {}
+  InMemoryScanTask(std::vector<std::shared_ptr<RecordBatch>> record_batches,
+                   std::shared_ptr<ScanOptions> options,
+                   std::shared_ptr<ScanContext> context)
+      : ScanTask(std::move(options), std::move(context)),
+        record_batches_(std::move(record_batches)) {}
 
-  RecordBatchIterator Scan() override;
+  Result<RecordBatchIterator> Execute() override;
 
  protected:
   std::vector<std::shared_ptr<RecordBatch>> record_batches_;
 };
 
+ARROW_DS_EXPORT Result<ScanTaskIterator> ScanTaskIteratorFromRecordBatch(
+    std::vector<std::shared_ptr<RecordBatch>> batches,
+    std::shared_ptr<ScanOptions> options, std::shared_ptr<ScanContext>);
+
 /// \brief Scanner is a materialized scan operation with context and options
-/// bound. A scanner is the class that glues ScanTask, DataFragment,
-/// and DataSource. In python pseudo code, it performs the following:
+/// bound. A scanner is the class that glues ScanTask, Fragment,
+/// and Source. In python pseudo code, it performs the following:
 ///
 ///  def Scan():
 ///    for source in this.sources_:
@@ -93,70 +147,82 @@ class ARROW_DS_EXPORT SimpleScanTask : public ScanTask {
 ///          yield scan_task
 class ARROW_DS_EXPORT Scanner {
  public:
-  /// \brief The Scan operator returns a stream of ScanTask. The caller is
-  /// responsible to dispatch/schedule said tasks. Tasks should be safe to run
-  /// in a concurrent fashion and outlive the iterator.
-  virtual ScanTaskIterator Scan() = 0;
-
-  virtual ~Scanner() = default;
-};
-
-/// \brief SimpleScanner is a trivial Scanner implementation that flattens
-/// chained iterators.
-///
-/// The returned iterator of SimpleScanner::Scan is a serial blocking
-/// iterator. It will block if any of the following methods blocks:
-///  - Iterator::Next
-///  - DataSource::GetFragments
-///  - DataFragment::Scan
-///
-/// Thus, this iterator is not suited for consumption of sources/fragments
-/// where the previous methods can block for a long time, e.g. if fetching a
-/// DataFragment from cloud storage, or a DataFragment must be parsed before
-/// returning a ScanTaskIterator.
-class ARROW_DS_EXPORT SimpleScanner : public Scanner {
- public:
-  SimpleScanner(std::vector<std::shared_ptr<DataSource>> sources,
-                std::shared_ptr<ScanOptions> options,
-                std::shared_ptr<ScanContext> context)
+  Scanner(SourceVector sources, std::shared_ptr<ScanOptions> options,
+          std::shared_ptr<ScanContext> context)
       : sources_(std::move(sources)),
         options_(std::move(options)),
         context_(std::move(context)) {}
 
-  ScanTaskIterator Scan() override;
+  /// \brief The Scan operator returns a stream of ScanTask. The caller is
+  /// responsible to dispatch/schedule said tasks. Tasks should be safe to run
+  /// in a concurrent fashion and outlive the iterator.
+  Result<ScanTaskIterator> Scan();
 
- private:
-  std::vector<std::shared_ptr<DataSource>> sources_;
+  /// \brief Convert a Scanner into a Table.
+  ///
+  /// Use this convenience utility with care. This will serially materialize the
+  /// Scan result in memory before creating the Table.
+  Result<std::shared_ptr<Table>> ToTable();
+
+  std::shared_ptr<Schema> schema() const { return options_->schema(); }
+
+ protected:
+  /// \brief Return a TaskGroup according to ScanContext thread rules.
+  std::shared_ptr<internal::TaskGroup> TaskGroup() const;
+
+  SourceVector sources_;
   std::shared_ptr<ScanOptions> options_;
   std::shared_ptr<ScanContext> context_;
 };
 
+/// \brief ScannerBuilder is a factory class to construct a Scanner. It is used
+/// to pass information, notably a potential filter expression and a subset of
+/// columns to materialize.
 class ARROW_DS_EXPORT ScannerBuilder {
  public:
-  ScannerBuilder(std::shared_ptr<Dataset> dataset,
-                 std::shared_ptr<ScanContext> scan_context);
+  ScannerBuilder(std::shared_ptr<Dataset> dataset, std::shared_ptr<ScanContext> context);
 
-  /// \brief Set
-  ScannerBuilder* Project(const std::vector<std::string>& columns);
+  /// \brief Set the subset of columns to materialize.
+  ///
+  /// This subset will be passed down to Sources and corresponding Fragments.
+  /// The goal is to avoid loading/copying/deserializing columns that will
+  /// not be required further down the compute chain.
+  ///
+  /// \param[in] columns list of columns to project. Order and duplicates will
+  ///            be preserved.
+  ///
+  /// \return Failure if any column name does not exists in the dataset's
+  ///         Schema.
+  Status Project(const std::vector<std::string>& columns);
 
-  ScannerBuilder* AddFilter(const std::shared_ptr<Filter>& filter);
+  /// \brief Set the filter expression to return only rows matching the filter.
+  ///
+  /// The predicate will be passed down to Sources and corresponding
+  /// Fragments to exploit predicate pushdown if possible using
+  /// partition information or Fragment internal metadata, e.g. Parquet statistics.
+  ///
+  /// \param[in] filter expression to filter rows with.
+  ///
+  /// \return Failure if any referenced columns does not exist in the dataset's
+  ///         Schema.
+  Status Filter(std::shared_ptr<Expression> filter);
+  Status Filter(const Expression& filter);
 
-  ScannerBuilder* SetGlobalFileOptions(std::shared_ptr<FileScanOptions> options);
-
-  /// \brief If true (default), add partition keys to the
-  /// RecordBatches that the scan produces if they are not in the data
-  /// otherwise
-  ScannerBuilder* IncludePartitionKeys(bool include = true);
+  /// \brief Indicate if the Scanner should make use of the available
+  ///        ThreadPool found in ScanContext;
+  Status UseThreads(bool use_threads = true);
 
   /// \brief Return the constructed now-immutable Scanner object
-  Status Finish(std::unique_ptr<Scanner>* out) const;
+  Result<std::shared_ptr<Scanner>> Finish() const;
+
+  std::shared_ptr<Schema> schema() const { return dataset_->schema(); }
 
  private:
   std::shared_ptr<Dataset> dataset_;
-  std::shared_ptr<ScanContext> scan_context_;
+  std::shared_ptr<ScanOptions> options_;
+  std::shared_ptr<ScanContext> context_;
+  bool has_projection_ = false;
   std::vector<std::string> project_columns_;
-  FilterVector filters_;
-  bool include_partition_keys_;
 };
 
 }  // namespace dataset
