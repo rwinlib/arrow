@@ -20,8 +20,7 @@
 // XXX(ARROW-6468): this header is now unused.  We keep CRC hash implementations
 // around in case they're useful some day (Parquet checksumming?).
 
-#ifndef ARROW_UTIL_HASH_UTIL_H
-#define ARROW_UTIL_HASH_UTIL_H
+#pragma once
 
 #include <cassert>
 #include <cstdint>
@@ -56,7 +55,7 @@ static inline uint32_t HW_crc32_u64(uint32_t crc, uint64_t v) {
 #define HW_crc32_u16 SSE4_crc32_u16
 #define HW_crc32_u32 SSE4_crc32_u32
 #define HW_crc32_u64 SSE4_crc32_u64
-#elif defined(ARROW_HAVE_ARM_CRC)
+#elif defined(ARROW_HAVE_ARMV8_CRC)
 #define HW_crc32_u8 ARMCE_crc32_u8
 #define HW_crc32_u16 ARMCE_crc32_u16
 #define HW_crc32_u32 ARMCE_crc32_u32
@@ -68,7 +67,7 @@ namespace arrow {
 /// Utility class to compute hash values.
 class HashUtil {
  public:
-#if defined(ARROW_HAVE_SSE4_2) || defined(ARROW_HAVE_ARM_CRC)
+#if defined(ARROW_HAVE_SSE4_2) || defined(ARROW_HAVE_ARMV8_CRC)
   static constexpr bool have_hardware_crc32 = true;
 #else
   static constexpr bool have_hardware_crc32 = false;
@@ -249,5 +248,3 @@ class HashUtil {
 };
 
 }  // namespace arrow
-
-#endif  // ARROW_UTIL_HASH_UTIL_H

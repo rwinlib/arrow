@@ -83,7 +83,7 @@ class NumericBuilder : public ArrayBuilder {
   /// uninitialized memory access
   Status AppendNulls(int64_t length) final {
     ARROW_RETURN_NOT_OK(Reserve(length));
-    data_builder_.UnsafeAppend(length, static_cast<value_type>(0));
+    data_builder_.UnsafeAppend(length, value_type{});  // zero
     UnsafeSetNull(length);
     return Status::OK();
   }
@@ -91,7 +91,7 @@ class NumericBuilder : public ArrayBuilder {
   /// \brief Append a single null element
   Status AppendNull() final {
     ARROW_RETURN_NOT_OK(Reserve(1));
-    data_builder_.UnsafeAppend(static_cast<value_type>(0));
+    data_builder_.UnsafeAppend(value_type{});  // zero
     UnsafeAppendToBitmap(false);
     return Status::OK();
   }
@@ -101,7 +101,7 @@ class NumericBuilder : public ArrayBuilder {
   void Reset() override { data_builder_.Reset(); }
 
   Status Resize(int64_t capacity) override {
-    ARROW_RETURN_NOT_OK(CheckCapacity(capacity, capacity_));
+    ARROW_RETURN_NOT_OK(CheckCapacity(capacity));
     capacity = std::max(capacity, kMinBuilderCapacity);
     ARROW_RETURN_NOT_OK(data_builder_.Resize(capacity));
     return ArrayBuilder::Resize(capacity);
@@ -243,7 +243,7 @@ class NumericBuilder : public ArrayBuilder {
 
   void UnsafeAppendNull() {
     ArrayBuilder::UnsafeAppendToBitmap(false);
-    data_builder_.UnsafeAppend(0);
+    data_builder_.UnsafeAppend(value_type{});  // zero
   }
 
   std::shared_ptr<DataType> type() const override { return type_; }

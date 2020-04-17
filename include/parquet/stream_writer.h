@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef PARQUET_STREAM_WRITER_H
-#define PARQUET_STREAM_WRITER_H
+#pragma once
 
 #include <array>
 #include <chrono>
@@ -230,10 +229,10 @@ class PARQUET_EXPORT StreamWriter {
 };
 
 struct PARQUET_EXPORT EndRowType {};
-constexpr EndRowType EndRow;
+constexpr EndRowType EndRow = {};
 
 struct PARQUET_EXPORT EndRowGroupType {};
-constexpr EndRowGroupType EndRowGroup;
+constexpr EndRowGroupType EndRowGroup = {};
 
 PARQUET_EXPORT
 StreamWriter& operator<<(StreamWriter&, EndRowType);
@@ -242,5 +241,3 @@ PARQUET_EXPORT
 StreamWriter& operator<<(StreamWriter&, EndRowGroupType);
 
 }  // namespace parquet
-
-#endif  // PARQUET_STREAM_WRITER_H

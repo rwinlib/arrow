@@ -24,6 +24,12 @@
 #include "arrow/filesystem/filesystem.h"
 
 namespace arrow {
+namespace internal {
+
+class Uri;
+
+}
+
 namespace fs {
 
 /// Options for the LocalFileSystem implementation.
@@ -34,6 +40,11 @@ struct ARROW_EXPORT LocalFileSystemOptions {
 
   /// \brief Initialize with defaults
   static LocalFileSystemOptions Defaults();
+
+  bool Equals(const LocalFileSystemOptions& other) const;
+
+  static Result<LocalFileSystemOptions> FromUri(const ::arrow::internal::Uri& uri,
+                                                std::string* out_path);
 };
 
 /// \brief A FileSystem implementation accessing files on the local machine.
@@ -50,11 +61,17 @@ class ARROW_EXPORT LocalFileSystem : public FileSystem {
 
   std::string type_name() const override { return "local"; }
 
+  Result<std::string> NormalizePath(std::string path) override;
+
+  bool Equals(const FileSystem& other) const override;
+
+  LocalFileSystemOptions options() const { return options_; }
+
   /// \cond FALSE
-  using FileSystem::GetTargetStats;
+  using FileSystem::GetFileInfo;
   /// \endcond
-  Result<FileStats> GetTargetStats(const std::string& path) override;
-  Result<std::vector<FileStats>> GetTargetStats(const FileSelector& select) override;
+  Result<FileInfo> GetFileInfo(const std::string& path) override;
+  Result<std::vector<FileInfo>> GetFileInfo(const FileSelector& select) override;
 
   Status CreateDir(const std::string& path, bool recursive = true) override;
 
@@ -79,6 +96,14 @@ class ARROW_EXPORT LocalFileSystem : public FileSystem {
  protected:
   LocalFileSystemOptions options_;
 };
+
+namespace internal {
+
+// Return whether the string is detected as a local absolute path.
+ARROW_EXPORT
+bool DetectAbsolutePath(const std::string& s);
+
+}  // namespace internal
 
 }  // namespace fs
 }  // namespace arrow

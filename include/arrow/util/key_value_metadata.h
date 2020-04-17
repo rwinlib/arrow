@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_UTIL_KEY_VALUE_METADATA_H
-#define ARROW_UTIL_KEY_VALUE_METADATA_H
+#pragma once
 
 #include <cstdint>
 #include <memory>
@@ -25,6 +24,8 @@
 #include <utility>
 #include <vector>
 
+#include "arrow/result.h"
+#include "arrow/status.h"
 #include "arrow/util/macros.h"
 #include "arrow/util/visibility.h"
 
@@ -34,14 +35,17 @@ namespace arrow {
 class ARROW_EXPORT KeyValueMetadata {
  public:
   KeyValueMetadata();
-  KeyValueMetadata(const std::vector<std::string>& keys,
-                   const std::vector<std::string>& values);
+  KeyValueMetadata(std::vector<std::string> keys, std::vector<std::string> values);
   explicit KeyValueMetadata(const std::unordered_map<std::string, std::string>& map);
   virtual ~KeyValueMetadata() = default;
 
   void ToUnorderedMap(std::unordered_map<std::string, std::string>* out) const;
-
   void Append(const std::string& key, const std::string& value);
+
+  Result<std::string> Get(const std::string& key) const;
+  Status Delete(const std::string& key);
+  Status Set(const std::string& key, const std::string& value);
+  bool Contains(const std::string& key) const;
 
   void reserve(int64_t n);
   int64_t size() const;
@@ -54,6 +58,11 @@ class ARROW_EXPORT KeyValueMetadata {
   int FindKey(const std::string& key) const;
 
   std::shared_ptr<KeyValueMetadata> Copy() const;
+
+  /// \brief Return a new KeyValueMetadata by combining the passed metadata
+  /// with this KeyValueMetadata. Colliding keys will be overridden by the
+  /// passed metadata. Assumes keys in both containers are unique
+  std::shared_ptr<KeyValueMetadata> Merge(const KeyValueMetadata& other) const;
 
   bool Equals(const KeyValueMetadata& other) const;
   std::string ToString() const;
@@ -75,9 +84,7 @@ key_value_metadata(const std::unordered_map<std::string, std::string>& pairs);
 ///
 /// \param keys sequence of metadata keys
 /// \param values sequence of corresponding metadata values
-std::shared_ptr<KeyValueMetadata> ARROW_EXPORT key_value_metadata(
-    const std::vector<std::string>& keys, const std::vector<std::string>& values);
+std::shared_ptr<KeyValueMetadata> ARROW_EXPORT
+key_value_metadata(std::vector<std::string> keys, std::vector<std::string> values);
 
 }  // namespace arrow
-
-#endif  //  ARROW_UTIL_KEY_VALUE_METADATA_H

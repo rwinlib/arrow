@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef PARQUET_ARROW_WRITER_H
-#define PARQUET_ARROW_WRITER_H
+#pragma once
 
 #include <cstdint>
 #include <memory>
@@ -28,8 +27,6 @@ namespace arrow {
 
 class Array;
 class ChunkedArray;
-class RecordBatch;
-class RecordBatchReader;
 class Schema;
 class Table;
 
@@ -108,5 +105,3 @@ WriteTable(const ::arrow::Table& table, MemoryPool* pool,
 
 }  // namespace arrow
 }  // namespace parquet
-
-#endif  // PARQUET_ARROW_WRITER_H

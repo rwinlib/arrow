@@ -23,32 +23,33 @@
 #include <vector>
 
 #include "arrow/filesystem/filesystem.h"
+#include "arrow/util/windows_fixup.h"
 
 namespace arrow {
 namespace fs {
 namespace internal {
 
-struct DirInfo {
+struct MockDirInfo {
   std::string full_path;
   TimePoint mtime;
 
-  bool operator==(const DirInfo& other) const {
+  bool operator==(const MockDirInfo& other) const {
     return mtime == other.mtime && full_path == other.full_path;
   }
 
-  friend ARROW_EXPORT std::ostream& operator<<(std::ostream&, const DirInfo&);
+  friend ARROW_EXPORT std::ostream& operator<<(std::ostream&, const MockDirInfo&);
 };
 
-struct FileInfo {
+struct MockFileInfo {
   std::string full_path;
   TimePoint mtime;
   std::string data;
 
-  bool operator==(const FileInfo& other) const {
+  bool operator==(const MockFileInfo& other) const {
     return mtime == other.mtime && full_path == other.full_path && data == other.data;
   }
 
-  friend ARROW_EXPORT std::ostream& operator<<(std::ostream&, const FileInfo&);
+  friend ARROW_EXPORT std::ostream& operator<<(std::ostream&, const MockFileInfo&);
 };
 
 /// A mock FileSystem implementation that holds its contents in memory.
@@ -62,11 +63,13 @@ class ARROW_EXPORT MockFileSystem : public FileSystem {
 
   std::string type_name() const override { return "mock"; }
 
+  bool Equals(const FileSystem& other) const override;
+
   // XXX It's not very practical to have to explicitly declare inheritance
   // of default overrides.
-  using FileSystem::GetTargetStats;
-  Result<FileStats> GetTargetStats(const std::string& path) override;
-  Result<std::vector<FileStats>> GetTargetStats(const FileSelector& select) override;
+  using FileSystem::GetFileInfo;
+  Result<FileInfo> GetFileInfo(const std::string& path) override;
+  Result<std::vector<FileInfo>> GetFileInfo(const FileSelector& select) override;
 
   Status CreateDir(const std::string& path, bool recursive = true) override;
 
@@ -90,17 +93,17 @@ class ARROW_EXPORT MockFileSystem : public FileSystem {
 
   // Contents-dumping helpers to ease testing.
   // Output is lexicographically-ordered by full path.
-  std::vector<DirInfo> AllDirs();
-  std::vector<FileInfo> AllFiles();
+  std::vector<MockDirInfo> AllDirs();
+  std::vector<MockFileInfo> AllFiles();
 
   // Create a File with a content from a string.
   Status CreateFile(const std::string& path, const std::string& content,
                     bool recursive = true);
 
-  // Create a MockFileSystem out of (empty) FileStats. The content of every
+  // Create a MockFileSystem out of (empty) FileInfo. The content of every
   // file is empty and of size 0. All directories will be created recursively.
   static Result<std::shared_ptr<FileSystem>> Make(TimePoint current_time,
-                                                  const std::vector<FileStats>& stats);
+                                                  const std::vector<FileInfo>& infos);
 
   class Impl;
 

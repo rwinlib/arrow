@@ -37,66 +37,98 @@
 namespace arrow {
 namespace dataset {
 
-/// \brief SourceFactory provides a way to inspect/discover a Source's expected
-/// schema before materializing said Source.
-class ARROW_DS_EXPORT SourceFactory {
+struct InspectOptions {
+  /// See `fragments` property.
+  static constexpr int kInspectAllFragments = -1;
+
+  /// Indicate how many fragments should be inspected to infer the unified dataset
+  /// schema. Limiting the number of fragments accessed improves the latency of
+  /// the discovery process when dealing with a high number of fragments and/or
+  /// high latency file systems.
+  ///
+  /// The default value of `1` inspects the schema of the first (in no particular
+  /// order) fragment only. If the dataset has a uniform schema for all fragments,
+  /// this default is the optimal value. In order to inspect all fragments and
+  /// robustly unify their potentially varying schemas, set this option to
+  /// `kInspectAllFragments`. A value of `0` disables inspection of fragments
+  /// altogether so only the partitioning schema will be inspected.
+  int fragments = 1;
+};
+
+struct FinishOptions {
+  /// Finalize the dataset with this given schema. If the schema is not
+  /// provided, infer the schema via the Inspect, see the `inspect_options`
+  /// property.
+  std::shared_ptr<Schema> schema = NULLPTR;
+
+  /// If the schema is not provided, it will be discovered by passing the
+  /// following options to `DatasetDiscovery::Inspect`.
+  InspectOptions inspect_options{};
+
+  /// Indicate if the given Schema (when specified), should be validated against
+  /// the fragments' schemas. `inspect_options` will control how many fragments
+  /// are checked.
+  bool validate_fragments = false;
+};
+
+/// \brief DatasetFactory provides a way to inspect/discover a Dataset's expected
+/// schema before materializing said Dataset.
+class ARROW_DS_EXPORT DatasetFactory {
  public:
   /// \brief Get the schemas of the Fragments and Partitioning.
-  virtual Result<std::vector<std::shared_ptr<Schema>>> InspectSchemas() = 0;
+  virtual Result<std::vector<std::shared_ptr<Schema>>> InspectSchemas(
+      InspectOptions options) = 0;
 
-  /// \brief Get unified schema for the resulting Source.
-  virtual Result<std::shared_ptr<Schema>> Inspect();
+  /// \brief Get unified schema for the resulting Dataset.
+  Result<std::shared_ptr<Schema>> Inspect(InspectOptions options = {});
 
-  /// \brief Create a Source with the given schema.
-  virtual Result<std::shared_ptr<Source>> Finish(
-      const std::shared_ptr<Schema>& schema) = 0;
+  /// \brief Create a Dataset
+  Result<std::shared_ptr<Dataset>> Finish();
+  Result<std::shared_ptr<Dataset>> Finish(std::shared_ptr<Schema> schema);
+  virtual Result<std::shared_ptr<Dataset>> Finish(FinishOptions options) = 0;
 
-  /// \brief Create a Source using the inspected schema.
-  virtual Result<std::shared_ptr<Source>> Finish();
-
-  /// \brief Optional root partition for the resulting Source.
+  /// \brief Optional root partition for the resulting Dataset.
   const std::shared_ptr<Expression>& root_partition() const { return root_partition_; }
   Status SetRootPartition(std::shared_ptr<Expression> partition) {
     root_partition_ = partition;
     return Status::OK();
   }
 
-  virtual ~SourceFactory() = default;
+  virtual ~DatasetFactory() = default;
 
  protected:
-  SourceFactory();
+  DatasetFactory();
 
   std::shared_ptr<Expression> root_partition_;
 };
 
 /// \brief DatasetFactory provides a way to inspect/discover a Dataset's
-/// expected schema before materializing the Dataset and underlying Sources.
-class ARROW_DS_EXPORT DatasetFactory {
+/// expected schema before materialization.
+class ARROW_DS_EXPORT UnionDatasetFactory : public DatasetFactory {
  public:
   static Result<std::shared_ptr<DatasetFactory>> Make(
-      std::vector<std::shared_ptr<SourceFactory>> factories);
+      std::vector<std::shared_ptr<DatasetFactory>> factories);
 
-  /// \brief Return the list of SourceFactory
-  const std::vector<std::shared_ptr<SourceFactory>>& factories() const {
+  /// \brief Return the list of child DatasetFactory
+  const std::vector<std::shared_ptr<DatasetFactory>>& factories() const {
     return factories_;
   }
 
-  /// \brief Get the schemas of the Sources.
-  Result<std::vector<std::shared_ptr<Schema>>> InspectSchemas();
+  /// \brief Get the schemas of the Datasets.
+  ///
+  /// Instead of applying options globally, it applies at each child factory.
+  /// This will not respect `options.fragments` exactly, but will respect the
+  /// spirit of peeking the first fragments or all of them.
+  Result<std::vector<std::shared_ptr<Schema>>> InspectSchemas(
+      InspectOptions options) override;
 
-  /// \brief Get unified schema for the resulting Dataset.
-  Result<std::shared_ptr<Schema>> Inspect();
-
-  /// \brief Create a Dataset with the given schema.
-  Result<std::shared_ptr<Dataset>> Finish(const std::shared_ptr<Schema>& schema);
-
-  /// \brief Create a Dataset using the inspected schema.
-  Result<std::shared_ptr<Dataset>> Finish();
+  /// \brief Create a Dataset.
+  Result<std::shared_ptr<Dataset>> Finish(FinishOptions options) override;
 
  protected:
-  explicit DatasetFactory(std::vector<std::shared_ptr<SourceFactory>> factories);
+  explicit UnionDatasetFactory(std::vector<std::shared_ptr<DatasetFactory>> factories);
 
-  std::vector<std::shared_ptr<SourceFactory>> factories_;
+  std::vector<std::shared_ptr<DatasetFactory>> factories_;
 };
 
 struct FileSystemFactoryOptions {
@@ -107,13 +139,13 @@ struct FileSystemFactoryOptions {
   // is a Partitioning which will yield no partition information.
   //
   // The (explicit or discovered) partitioning will be applied to discovered files
-  // and the resulting partition information embedded in the Source.
+  // and the resulting partition information embedded in the Dataset.
   PartitioningOrFactory partitioning{Partitioning::Default()};
 
   // For the purposes of applying the partitioning, paths will be stripped
   // of the partition_base_dir. Files not matching the partition_base_dir
   // prefix will be skipped for partition discovery. The ignored files will still
-  // be part of the Source, but will not have partition information.
+  // be part of the Dataset, but will not have partition information.
   //
   // Example:
   // partition_base_dir = "/dataset";
@@ -129,70 +161,68 @@ struct FileSystemFactoryOptions {
   // Invalid files (via selector or explicitly) will be excluded by checking
   // with the FileFormat::IsSupported method.  This will incur IO for each files
   // in a serial and single threaded fashion. Disabling this feature will skip the
-  // IO, but unsupported files may be present in the Source
+  // IO, but unsupported files may be present in the Dataset
   // (resulting in an error at scan time).
-  bool exclude_invalid_files = true;
+  bool exclude_invalid_files = false;
 
-  // Files matching one of the following prefix will be ignored by the
-  // discovery process. This is matched to the basename of a path.
+  // When discovering from a Selector (and not from an explicit file list), ignore
+  // files and directories matching any of these prefixes.
   //
-  // Example:
-  // ignore_prefixes = {"_", ".DS_STORE" };
+  // Example (with selector = "/dataset/**"):
+  // selector_ignore_prefixes = {"_", ".DS_STORE" };
   //
   // - "/dataset/data.csv" -> not ignored
   // - "/dataset/_metadata" -> ignored
   // - "/dataset/.DS_STORE" -> ignored
-  std::vector<std::string> ignore_prefixes = {
+  // - "/dataset/_hidden/dat" -> ignored
+  // - "/dataset/nested/.DS_STORE" -> ignored
+  std::vector<std::string> selector_ignore_prefixes = {
       ".",
       "_",
   };
 };
 
-/// \brief FileSystemSourceFactory creates a Source from a vector of
-/// fs::FileStats or a fs::FileSelector.
-class ARROW_DS_EXPORT FileSystemSourceFactory : public SourceFactory {
+/// \brief FileSystemDatasetFactory creates a Dataset from a vector of
+/// fs::FileInfo or a fs::FileSelector.
+class ARROW_DS_EXPORT FileSystemDatasetFactory : public DatasetFactory {
  public:
-  /// \brief Build a FileSystemSourceFactory from an explicit list of
+  /// \brief Build a FileSystemDatasetFactory from an explicit list of
   /// paths.
   ///
-  /// \param[in] filesystem passed to FileSystemSource
-  /// \param[in] paths passed to FileSystemSource
-  /// \param[in] format passed to FileSystemSource
+  /// \param[in] filesystem passed to FileSystemDataset
+  /// \param[in] paths passed to FileSystemDataset
+  /// \param[in] format passed to FileSystemDataset
   /// \param[in] options see FileSystemFactoryOptions for more information.
-  static Result<std::shared_ptr<SourceFactory>> Make(
+  static Result<std::shared_ptr<DatasetFactory>> Make(
       std::shared_ptr<fs::FileSystem> filesystem, const std::vector<std::string>& paths,
       std::shared_ptr<FileFormat> format, FileSystemFactoryOptions options);
 
-  /// \brief Build a FileSystemSourceFactory from a fs::FileSelector.
+  /// \brief Build a FileSystemDatasetFactory from a fs::FileSelector.
   ///
-  /// The selector will expand to a vector of FileStats. The expansion/crawling
-  /// is performed in this function call. Thus, the finalized Source is
+  /// The selector will expand to a vector of FileInfo. The expansion/crawling
+  /// is performed in this function call. Thus, the finalized Dataset is
   /// working with a snapshot of the filesystem.
   //
   /// If options.partition_base_dir is not provided, it will be overwritten
   /// with selector.base_dir.
   ///
-  /// \param[in] filesystem passed to FileSystemSource
+  /// \param[in] filesystem passed to FileSystemDataset
   /// \param[in] selector used to crawl and search files
-  /// \param[in] format passed to FileSystemSource
+  /// \param[in] format passed to FileSystemDataset
   /// \param[in] options see FileSystemFactoryOptions for more information.
-  static Result<std::shared_ptr<SourceFactory>> Make(
+  static Result<std::shared_ptr<DatasetFactory>> Make(
       std::shared_ptr<fs::FileSystem> filesystem, fs::FileSelector selector,
       std::shared_ptr<FileFormat> format, FileSystemFactoryOptions options);
 
-  Result<std::vector<std::shared_ptr<Schema>>> InspectSchemas() override;
+  Result<std::vector<std::shared_ptr<Schema>>> InspectSchemas(
+      InspectOptions options) override;
 
-  Result<std::shared_ptr<Source>> Finish(const std::shared_ptr<Schema>& schema) override;
+  Result<std::shared_ptr<Dataset>> Finish(FinishOptions options) override;
 
  protected:
-  FileSystemSourceFactory(std::shared_ptr<fs::FileSystem> filesystem,
-                          fs::PathForest forest, std::shared_ptr<FileFormat> format,
-                          FileSystemFactoryOptions options);
-
-  static Result<fs::PathForest> Filter(const std::shared_ptr<fs::FileSystem>& filesystem,
-                                       const std::shared_ptr<FileFormat>& format,
-                                       const FileSystemFactoryOptions& options,
-                                       fs::PathForest forest);
+  FileSystemDatasetFactory(std::shared_ptr<fs::FileSystem> filesystem,
+                           fs::PathForest forest, std::shared_ptr<FileFormat> format,
+                           FileSystemFactoryOptions options);
 
   Result<std::shared_ptr<Schema>> PartitionSchema();
 

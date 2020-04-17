@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include <atomic>
+#include <atomic>  // IWYU pragma: export
 #include <cstdint>
 #include <iosfwd>
 #include <memory>
@@ -92,50 +92,38 @@ struct ARROW_EXPORT ArrayData {
       : type(type), length(length), null_count(null_count), offset(offset) {}
 
   ArrayData(const std::shared_ptr<DataType>& type, int64_t length,
-            const std::vector<std::shared_ptr<Buffer>>& buffers,
-            int64_t null_count = kUnknownNullCount, int64_t offset = 0)
-      : ArrayData(type, length, null_count, offset) {
-    this->buffers = buffers;
-  }
-
-  ArrayData(const std::shared_ptr<DataType>& type, int64_t length,
-            const std::vector<std::shared_ptr<Buffer>>& buffers,
-            const std::vector<std::shared_ptr<ArrayData>>& child_data,
-            int64_t null_count = kUnknownNullCount, int64_t offset = 0)
-      : ArrayData(type, length, null_count, offset) {
-    this->buffers = buffers;
-    this->child_data = child_data;
-  }
-
-  ArrayData(const std::shared_ptr<DataType>& type, int64_t length,
-            std::vector<std::shared_ptr<Buffer>>&& buffers,
+            std::vector<std::shared_ptr<Buffer>> buffers,
             int64_t null_count = kUnknownNullCount, int64_t offset = 0)
       : ArrayData(type, length, null_count, offset) {
     this->buffers = std::move(buffers);
   }
 
+  ArrayData(const std::shared_ptr<DataType>& type, int64_t length,
+            std::vector<std::shared_ptr<Buffer>> buffers,
+            std::vector<std::shared_ptr<ArrayData>> child_data,
+            int64_t null_count = kUnknownNullCount, int64_t offset = 0)
+      : ArrayData(type, length, null_count, offset) {
+    this->buffers = std::move(buffers);
+    this->child_data = std::move(child_data);
+  }
+
   static std::shared_ptr<ArrayData> Make(const std::shared_ptr<DataType>& type,
                                          int64_t length,
-                                         std::vector<std::shared_ptr<Buffer>>&& buffers,
+                                         std::vector<std::shared_ptr<Buffer>> buffers,
                                          int64_t null_count = kUnknownNullCount,
                                          int64_t offset = 0);
 
   static std::shared_ptr<ArrayData> Make(
       const std::shared_ptr<DataType>& type, int64_t length,
-      const std::vector<std::shared_ptr<Buffer>>& buffers,
+      std::vector<std::shared_ptr<Buffer>> buffers,
+      std::vector<std::shared_ptr<ArrayData>> child_data,
       int64_t null_count = kUnknownNullCount, int64_t offset = 0);
 
   static std::shared_ptr<ArrayData> Make(
       const std::shared_ptr<DataType>& type, int64_t length,
-      const std::vector<std::shared_ptr<Buffer>>& buffers,
-      const std::vector<std::shared_ptr<ArrayData>>& child_data,
-      int64_t null_count = kUnknownNullCount, int64_t offset = 0);
-
-  static std::shared_ptr<ArrayData> Make(
-      const std::shared_ptr<DataType>& type, int64_t length,
-      const std::vector<std::shared_ptr<Buffer>>& buffers,
-      const std::vector<std::shared_ptr<ArrayData>>& child_data,
-      const std::shared_ptr<Array>& dictionary, int64_t null_count = kUnknownNullCount,
+      std::vector<std::shared_ptr<Buffer>> buffers,
+      std::vector<std::shared_ptr<ArrayData>> child_data,
+      std::shared_ptr<Array> dictionary, int64_t null_count = kUnknownNullCount,
       int64_t offset = 0);
 
   static std::shared_ptr<ArrayData> Make(const std::shared_ptr<DataType>& type,
@@ -252,7 +240,25 @@ std::shared_ptr<Array> MakeArray(const std::shared_ptr<ArrayData>& data);
 /// \brief Create a strongly-typed Array instance with all elements null
 /// \param[in] type the array type
 /// \param[in] length the array length
+/// \param[in] pool the memory pool to allocate memory from
+ARROW_EXPORT
+Result<std::shared_ptr<Array>> MakeArrayOfNull(const std::shared_ptr<DataType>& type,
+                                               int64_t length,
+                                               MemoryPool* pool = default_memory_pool());
+
+/// \brief Create an Array instance whose slots are the given scalar
+/// \param[in] scalar the value with which to fill the array
+/// \param[in] length the array length
+/// \param[in] pool the memory pool to allocate memory from
+ARROW_EXPORT
+Result<std::shared_ptr<Array>> MakeArrayFromScalar(
+    const Scalar& scalar, int64_t length, MemoryPool* pool = default_memory_pool());
+
+/// \brief Create a strongly-typed Array instance with all elements null
+/// \param[in] type the array type
+/// \param[in] length the array length
 /// \param[out] out resulting Array instance
+ARROW_DEPRECATED("Use Result-returning version")
 ARROW_EXPORT
 Status MakeArrayOfNull(const std::shared_ptr<DataType>& type, int64_t length,
                        std::shared_ptr<Array>* out);
@@ -262,6 +268,7 @@ Status MakeArrayOfNull(const std::shared_ptr<DataType>& type, int64_t length,
 /// \param[in] type the array type
 /// \param[in] length the array length
 /// \param[out] out resulting Array instance
+ARROW_DEPRECATED("Use Result-returning version")
 ARROW_EXPORT
 Status MakeArrayOfNull(MemoryPool* pool, const std::shared_ptr<DataType>& type,
                        int64_t length, std::shared_ptr<Array>* out);
@@ -270,6 +277,7 @@ Status MakeArrayOfNull(MemoryPool* pool, const std::shared_ptr<DataType>& type,
 /// \param[in] scalar the value with which to fill the array
 /// \param[in] length the array length
 /// \param[out] out resulting Array instance
+ARROW_DEPRECATED("Use Result-returning version")
 ARROW_EXPORT
 Status MakeArrayFromScalar(const Scalar& scalar, int64_t length,
                            std::shared_ptr<Array>* out);
@@ -279,6 +287,7 @@ Status MakeArrayFromScalar(const Scalar& scalar, int64_t length,
 /// \param[in] scalar the value with which to fill the array
 /// \param[in] length the array length
 /// \param[out] out resulting Array instance
+ARROW_DEPRECATED("Use Result-returning version")
 ARROW_EXPORT
 Status MakeArrayFromScalar(MemoryPool* pool, const Scalar& scalar, int64_t length,
                            std::shared_ptr<Array>* out);
@@ -378,6 +387,9 @@ class ARROW_EXPORT Array {
   /// Nested types are traversed in depth-first order. Data buffers must have
   /// the same item sizes, even though the logical types may be different.
   /// An error is returned if the types are not layout-compatible.
+  Result<std::shared_ptr<Array>> View(const std::shared_ptr<DataType>& type) const;
+
+  ARROW_DEPRECATED("Use Result-returning version")
   Status View(const std::shared_ptr<DataType>& type, std::shared_ptr<Array>* out) const;
 
   /// Construct a zero-copy slice of the array with the indicated offset and
@@ -437,8 +449,6 @@ class ARROW_EXPORT Array {
  private:
   ARROW_DISALLOW_COPY_AND_ASSIGN(Array);
 };
-
-using ArrayVector = std::vector<std::shared_ptr<Array>>;
 
 namespace internal {
 
@@ -625,7 +635,11 @@ class ARROW_EXPORT ListArray : public BaseListArray<ListType> {
   /// \param[in] values Array containing list values
   /// \param[in] pool MemoryPool in case new offsets array needs to be
   /// allocated because of null values
-  /// \param[out] out Will have length equal to offsets.length() - 1
+  static Result<std::shared_ptr<Array>> FromArrays(
+      const Array& offsets, const Array& values,
+      MemoryPool* pool = default_memory_pool());
+
+  ARROW_DEPRECATED("Use Result-returning version")
   static Status FromArrays(const Array& offsets, const Array& values, MemoryPool* pool,
                            std::shared_ptr<Array>* out);
 
@@ -667,7 +681,11 @@ class ARROW_EXPORT LargeListArray : public BaseListArray<LargeListType> {
   /// \param[in] values Array containing list values
   /// \param[in] pool MemoryPool in case new offsets array needs to be
   /// allocated because of null values
-  /// \param[out] out Will have length equal to offsets.length() - 1
+  static Result<std::shared_ptr<Array>> FromArrays(
+      const Array& offsets, const Array& values,
+      MemoryPool* pool = default_memory_pool());
+
+  ARROW_DEPRECATED("Use Result-returning version")
   static Status FromArrays(const Array& offsets, const Array& values, MemoryPool* pool,
                            std::shared_ptr<Array>* out);
 
@@ -720,7 +738,11 @@ class ARROW_EXPORT MapArray : public ListArray {
   /// \param[in] items Array containing item values
   /// \param[in] pool MemoryPool in case new offsets array needs to be
   /// allocated because of null values
-  /// \param[out] out Will have length equal to offsets.length() - 1
+  static Result<std::shared_ptr<Array>> FromArrays(
+      const std::shared_ptr<Array>& offsets, const std::shared_ptr<Array>& keys,
+      const std::shared_ptr<Array>& items, MemoryPool* pool = default_memory_pool());
+
+  ARROW_DEPRECATED("Use Result-returning version")
   static Status FromArrays(const std::shared_ptr<Array>& offsets,
                            const std::shared_ptr<Array>& keys,
                            const std::shared_ptr<Array>& items, MemoryPool* pool,
@@ -733,6 +755,10 @@ class ARROW_EXPORT MapArray : public ListArray {
 
   /// \brief Return array object containing all mapped items
   std::shared_ptr<Array> items() const { return items_; }
+
+  /// Validate child data before constructing the actual MapArray.
+  static Status ValidateChildData(
+      const std::vector<std::shared_ptr<ArrayData>>& child_data);
 
  protected:
   void SetData(const std::shared_ptr<ArrayData>& data);
@@ -1061,7 +1087,9 @@ class ARROW_EXPORT StructArray : public Array {
   /// \brief Flatten this array as a vector of arrays, one for each field
   ///
   /// \param[in] pool The pool to allocate null bitmaps from, if necessary
-  /// \param[out] out The resulting vector of arrays
+  Result<ArrayVector> Flatten(MemoryPool* pool = default_memory_pool()) const;
+
+  ARROW_DEPRECATED("Use Result-returning version")
   Status Flatten(MemoryPool* pool, ArrayVector* out) const;
 
  private:
@@ -1101,68 +1129,62 @@ class ARROW_EXPORT UnionArray : public Array {
   /// \param[in] children Vector of children Arrays containing the data for each type.
   /// \param[in] field_names Vector of strings containing the name of each field.
   /// \param[in] type_codes Vector of type codes.
-  /// \param[out] out Will have length equal to value_offsets.length()
+  static Result<std::shared_ptr<Array>> MakeDense(
+      const Array& type_ids, const Array& value_offsets,
+      const std::vector<std::shared_ptr<Array>>& children,
+      const std::vector<std::string>& field_names = {},
+      const std::vector<type_code_t>& type_codes = {});
+
+  /// \brief Construct Dense UnionArray from types_ids, value_offsets and children
+  ///
+  /// This function does the bare minimum of validation of the offsets and
+  /// input types. The value_offsets are assumed to be well-formed.
+  ///
+  /// \param[in] type_ids An array of logical type ids for the union type
+  /// \param[in] value_offsets An array of signed int32 values indicating the
+  /// relative offset into the respective child array for the type in a given slot.
+  /// The respective offsets for each child value array must be in order / increasing.
+  /// \param[in] children Vector of children Arrays containing the data for each type.
+  /// \param[in] type_codes Vector of type codes.
+  static Result<std::shared_ptr<Array>> MakeDense(
+      const Array& type_ids, const Array& value_offsets,
+      const std::vector<std::shared_ptr<Array>>& children,
+      const std::vector<type_code_t>& type_codes) {
+    return MakeDense(type_ids, value_offsets, children, std::vector<std::string>{},
+                     type_codes);
+  }
+
+  ARROW_DEPRECATED("Use Result-returning version")
   static Status MakeDense(const Array& type_ids, const Array& value_offsets,
                           const std::vector<std::shared_ptr<Array>>& children,
                           const std::vector<std::string>& field_names,
                           const std::vector<type_code_t>& type_codes,
-                          std::shared_ptr<Array>* out);
+                          std::shared_ptr<Array>* out) {
+    return MakeDense(type_ids, value_offsets, children, field_names, type_codes)
+        .Value(out);
+  }
 
-  /// \brief Construct Dense UnionArray from types_ids, value_offsets and children
-  ///
-  /// This function does the bare minimum of validation of the offsets and
-  /// input types. The value_offsets are assumed to be well-formed.
-  ///
-  /// \param[in] type_ids An array of logical type ids for the union type
-  /// \param[in] value_offsets An array of signed int32 values indicating the
-  /// relative offset into the respective child array for the type in a given slot.
-  /// The respective offsets for each child value array must be in order / increasing.
-  /// \param[in] children Vector of children Arrays containing the data for each type.
-  /// \param[in] field_names Vector of strings containing the name of each field.
-  /// \param[out] out Will have length equal to value_offsets.length()
+  ARROW_DEPRECATED("Use Result-returning version")
   static Status MakeDense(const Array& type_ids, const Array& value_offsets,
                           const std::vector<std::shared_ptr<Array>>& children,
                           const std::vector<std::string>& field_names,
                           std::shared_ptr<Array>* out) {
-    return MakeDense(type_ids, value_offsets, children, field_names, {}, out);
+    return MakeDense(type_ids, value_offsets, children, field_names).Value(out);
   }
 
-  /// \brief Construct Dense UnionArray from types_ids, value_offsets and children
-  ///
-  /// This function does the bare minimum of validation of the offsets and
-  /// input types. The value_offsets are assumed to be well-formed.
-  ///
-  /// \param[in] type_ids An array of logical type ids for the union type
-  /// \param[in] value_offsets An array of signed int32 values indicating the
-  /// relative offset into the respective child array for the type in a given slot.
-  /// The respective offsets for each child value array must be in order / increasing.
-  /// \param[in] children Vector of children Arrays containing the data for each type.
-  /// \param[in] type_codes Vector of type codes.
-  /// \param[out] out Will have length equal to value_offsets.length()
+  ARROW_DEPRECATED("Use Result-returning version")
   static Status MakeDense(const Array& type_ids, const Array& value_offsets,
                           const std::vector<std::shared_ptr<Array>>& children,
                           const std::vector<type_code_t>& type_codes,
                           std::shared_ptr<Array>* out) {
-    return MakeDense(type_ids, value_offsets, children, {}, type_codes, out);
+    return MakeDense(type_ids, value_offsets, children, type_codes).Value(out);
   }
 
-  /// \brief Construct Dense UnionArray from types_ids, value_offsets and children
-  ///
-  /// This function does the bare minimum of validation of the offsets and
-  /// input types. The value_offsets are assumed to be well-formed.
-  ///
-  /// The name of each field is filled by the index of the field.
-  ///
-  /// \param[in] type_ids An array of logical type ids for the union type
-  /// \param[in] value_offsets An array of signed int32 values indicating the
-  /// relative offset into the respective child array for the type in a given slot.
-  /// The respective offsets for each child value array must be in order / increasing.
-  /// \param[in] children Vector of children Arrays containing the data for each type.
-  /// \param[out] out Will have length equal to value_offsets.length()
+  ARROW_DEPRECATED("Use Result-returning version")
   static Status MakeDense(const Array& type_ids, const Array& value_offsets,
                           const std::vector<std::shared_ptr<Array>>& children,
                           std::shared_ptr<Array>* out) {
-    return MakeDense(type_ids, value_offsets, children, {}, {}, out);
+    return MakeDense(type_ids, value_offsets, children).Value(out);
   }
 
   /// \brief Construct Sparse UnionArray from type_ids and children
@@ -1174,28 +1196,10 @@ class ARROW_EXPORT UnionArray : public Array {
   /// \param[in] children Vector of children Arrays containing the data for each type.
   /// \param[in] field_names Vector of strings containing the name of each field.
   /// \param[in] type_codes Vector of type codes.
-  /// \param[out] out Will have length equal to type_ids.length()
-  static Status MakeSparse(const Array& type_ids,
-                           const std::vector<std::shared_ptr<Array>>& children,
-                           const std::vector<std::string>& field_names,
-                           const std::vector<type_code_t>& type_codes,
-                           std::shared_ptr<Array>* out);
-
-  /// \brief Construct Sparse UnionArray from type_ids and children
-  ///
-  /// This function does the bare minimum of validation of the offsets and
-  /// input types.
-  ///
-  /// \param[in] type_ids An array of logical type ids for the union type
-  /// \param[in] children Vector of children Arrays containing the data for each type.
-  /// \param[in] field_names Vector of strings containing the name of each field.
-  /// \param[out] out Will have length equal to type_ids.length()
-  static Status MakeSparse(const Array& type_ids,
-                           const std::vector<std::shared_ptr<Array>>& children,
-                           const std::vector<std::string>& field_names,
-                           std::shared_ptr<Array>* out) {
-    return MakeSparse(type_ids, children, field_names, {}, out);
-  }
+  static Result<std::shared_ptr<Array>> MakeSparse(
+      const Array& type_ids, const std::vector<std::shared_ptr<Array>>& children,
+      const std::vector<std::string>& field_names = {},
+      const std::vector<type_code_t>& type_codes = {});
 
   /// \brief Construct Sparse UnionArray from type_ids and children
   ///
@@ -1205,40 +1209,48 @@ class ARROW_EXPORT UnionArray : public Array {
   /// \param[in] type_ids An array of logical type ids for the union type
   /// \param[in] children Vector of children Arrays containing the data for each type.
   /// \param[in] type_codes Vector of type codes.
-  /// \param[out] out Will have length equal to type_ids.length()
+  static Result<std::shared_ptr<Array>> MakeSparse(
+      const Array& type_ids, const std::vector<std::shared_ptr<Array>>& children,
+      const std::vector<type_code_t>& type_codes) {
+    return MakeSparse(type_ids, children, std::vector<std::string>{}, type_codes);
+  }
+
+  ARROW_DEPRECATED("Use Result-returning version")
+  static Status MakeSparse(const Array& type_ids,
+                           const std::vector<std::shared_ptr<Array>>& children,
+                           const std::vector<std::string>& field_names,
+                           const std::vector<type_code_t>& type_codes,
+                           std::shared_ptr<Array>* out) {
+    return MakeSparse(type_ids, children, field_names, type_codes).Value(out);
+  }
+
+  ARROW_DEPRECATED("Use Result-returning version")
+  static Status MakeSparse(const Array& type_ids,
+                           const std::vector<std::shared_ptr<Array>>& children,
+                           const std::vector<std::string>& field_names,
+                           std::shared_ptr<Array>* out) {
+    return MakeSparse(type_ids, children, field_names).Value(out);
+  }
+
+  ARROW_DEPRECATED("Use Result-returning version")
   static Status MakeSparse(const Array& type_ids,
                            const std::vector<std::shared_ptr<Array>>& children,
                            const std::vector<type_code_t>& type_codes,
                            std::shared_ptr<Array>* out) {
-    return MakeSparse(type_ids, children, {}, type_codes, out);
+    return MakeSparse(type_ids, children, type_codes).Value(out);
   }
 
-  /// \brief Construct Sparse UnionArray from type_ids and children
-  ///
-  /// This function does the bare minimum of validation of the offsets and
-  /// input types.
-  ///
-  /// The name of each field is filled by the index of the field.
-  ///
-  /// \param[in] type_ids An array of logical type ids for the union type
-  /// \param[in] children Vector of children Arrays containing the data for each type.
-  /// \param[out] out Will have length equal to type_ids.length()
+  ARROW_DEPRECATED("Use Result-returning version")
   static Status MakeSparse(const Array& type_ids,
                            const std::vector<std::shared_ptr<Array>>& children,
                            std::shared_ptr<Array>* out) {
-    return MakeSparse(type_ids, children, {}, {}, out);
+    return MakeSparse(type_ids, children).Value(out);
   }
 
   /// Note that this buffer does not account for any slice offset
   std::shared_ptr<Buffer> type_codes() const { return data_->buffers[1]; }
 
   const type_code_t* raw_type_codes() const { return raw_type_codes_ + data_->offset; }
-
-  ARROW_DEPRECATED("Use UnionArray::type_codes")
-  std::shared_ptr<Buffer> type_ids() const { return type_codes(); }
-
-  ARROW_DEPRECATED("Use UnionArray::raw_type_codes")
-  const type_code_t* raw_type_ids() const { return raw_type_codes(); }
 
   /// The physical child id containing value at index.
   int child_id(int64_t i) const {
@@ -1318,7 +1330,11 @@ class ARROW_EXPORT DictionaryArray : public Array {
   /// type object
   /// \param[in] indices an array of non-negative signed
   /// integers smaller than the size of the dictionary
-  /// \param[out] out the resulting DictionaryArray instance
+  static Result<std::shared_ptr<Array>> FromArrays(
+      const std::shared_ptr<DataType>& type, const std::shared_ptr<Array>& indices,
+      const std::shared_ptr<Array>& dictionary);
+
+  ARROW_DEPRECATED("Use Result-returning version")
   static Status FromArrays(const std::shared_ptr<DataType>& type,
                            const std::shared_ptr<Array>& indices,
                            const std::shared_ptr<Array>& dictionary,
@@ -1331,12 +1347,16 @@ class ARROW_EXPORT DictionaryArray : public Array {
   /// The type and the transpose map are typically computed using
   /// DictionaryUnifier.
   ///
-  /// \param[in] pool a pool to allocate the array data from
   /// \param[in] type the new type object
   /// \param[in] dictionary the new dictionary
   /// \param[in] transpose_map transposition array of this array's indices
-  /// into the target array's indices
-  /// \param[out] out the resulting DictionaryArray instance
+  ///   into the target array's indices
+  /// \param[in] pool a pool to allocate the array data from
+  Result<std::shared_ptr<Array>> Transpose(
+      const std::shared_ptr<DataType>& type, const std::shared_ptr<Array>& dictionary,
+      const int32_t* transpose_map, MemoryPool* pool = default_memory_pool()) const;
+
+  ARROW_DEPRECATED("Use Result-returning version")
   Status Transpose(MemoryPool* pool, const std::shared_ptr<DataType>& type,
                    const std::shared_ptr<Array>& dictionary, const int32_t* transpose_map,
                    std::shared_ptr<Array>* out) const;

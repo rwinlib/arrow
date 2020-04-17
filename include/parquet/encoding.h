@@ -32,7 +32,6 @@ class Array;
 class ArrayBuilder;
 class BinaryArray;
 class BinaryBuilder;
-class BinaryDictionary32Builder;
 class BooleanBuilder;
 class Int32Type;
 class Int64Type;
@@ -147,7 +146,7 @@ struct EncodingTraits<ByteArrayType> {
     std::vector<std::shared_ptr<::arrow::Array>> chunks;
   };
   using ArrowType = ::arrow::BinaryType;
-  using DictAccumulator = ::arrow::BinaryDictionary32Builder;
+  using DictAccumulator = ::arrow::Dictionary32Builder<::arrow::BinaryType>;
 };
 
 template <>
@@ -302,16 +301,29 @@ class TypedDecoder : virtual public Decoder {
 
     // Add spacing for null entries. As we have filled the buffer from the front,
     // we need to add the spacing from the back.
-    int values_to_move = values_read;
-    for (int i = num_values - 1; i >= 0; i--) {
+    int values_to_move = values_read - 1;
+    // We stop early on one of two conditions:
+    // 1. There are no more null values that need spacing.  Note we infer this
+    //     backwards, when 'i' is equal to 'values_to_move' it indicates
+    //    all nulls have been consumed.
+    // 2. There are no more non-null values that need to move which indicates
+    //    all remaining slots are null, so their exact value doesn't matter.
+    for (int i = num_values - 1; (i > values_to_move) && (values_to_move >= 0); i--) {
       if (BitUtil::GetBit(valid_bits, valid_bits_offset + i)) {
-        buffer[i] = buffer[--values_to_move];
+        buffer[i] = buffer[values_to_move];
+        values_to_move--;
       }
     }
     return num_values;
   }
 
   /// \brief Decode into an ArrayBuilder or other accumulator
+  ///
+  /// This function assumes the definition levels were already decoded
+  /// as a validity bitmap in the given `valid_bits`.  `null_count`
+  /// is the number of 0s in `valid_bits`.
+  /// As a space optimization, it is allowed for `valid_bits` to be null
+  /// if `null_count` is zero.
   ///
   /// \return number of values decoded
   virtual int DecodeArrow(int num_values, int null_count, const uint8_t* valid_bits,
@@ -321,13 +333,18 @@ class TypedDecoder : virtual public Decoder {
   /// \brief Decode into an ArrayBuilder or other accumulator ignoring nulls
   ///
   /// \return number of values decoded
-  virtual int DecodeArrowNonNull(int num_values,
-                                 typename EncodingTraits<DType>::Accumulator* out) {
-    const uint8_t valid_bits = 0;
-    return DecodeArrow(num_values, 0, &valid_bits, 0, out);
+  int DecodeArrowNonNull(int num_values,
+                         typename EncodingTraits<DType>::Accumulator* out) {
+    return DecodeArrow(num_values, 0, /*valid_bits=*/NULLPTR, 0, out);
   }
 
   /// \brief Decode into a DictionaryBuilder
+  ///
+  /// This function assumes the definition levels were already decoded
+  /// as a validity bitmap in the given `valid_bits`.  `null_count`
+  /// is the number of 0s in `valid_bits`.
+  /// As a space optimization, it is allowed for `valid_bits` to be null
+  /// if `null_count` is zero.
   ///
   /// \return number of values decoded
   virtual int DecodeArrow(int num_values, int null_count, const uint8_t* valid_bits,
@@ -337,10 +354,9 @@ class TypedDecoder : virtual public Decoder {
   /// \brief Decode into a DictionaryBuilder ignoring nulls
   ///
   /// \return number of values decoded
-  virtual int DecodeArrowNonNull(
-      int num_values, typename EncodingTraits<DType>::DictAccumulator* builder) {
-    const uint8_t valid_bits = 0;
-    return DecodeArrow(num_values, 0, &valid_bits, 0, builder);
+  int DecodeArrowNonNull(int num_values,
+                         typename EncodingTraits<DType>::DictAccumulator* builder) {
+    return DecodeArrow(num_values, 0, /*valid_bits=*/NULLPTR, 0, builder);
   }
 };
 

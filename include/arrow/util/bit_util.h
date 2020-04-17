@@ -119,7 +119,11 @@ constexpr int64_t CeilDiv(int64_t value, int64_t divisor) {
   return (value == 0) ? 0 : 1 + (value - 1) / divisor;
 }
 
-constexpr int64_t BytesForBits(int64_t bits) { return (bits + 7) >> 3; }
+// Return the number of bytes needed to fit the given number of bits
+constexpr int64_t BytesForBits(int64_t bits) {
+  // This formula avoids integer overflow on very large `bits`
+  return (bits >> 3) + ((bits & 7) != 0);
+}
 
 constexpr bool IsPowerOf2(int64_t value) {
   return value > 0 && (value & (value - 1)) == 0;
@@ -524,6 +528,8 @@ class BitmapReader {
       }
     }
   }
+
+  int64_t position() const { return position_; }
 
  private:
   const uint8_t* bitmap_;

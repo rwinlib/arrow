@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_BUFFER_BUILDER_H
-#define ARROW_BUFFER_BUILDER_H
+#pragma once
 
 #include <algorithm>
 #include <cstdint>
@@ -42,13 +41,24 @@ namespace arrow {
 /// data
 class ARROW_EXPORT BufferBuilder {
  public:
-  explicit BufferBuilder(MemoryPool* pool ARROW_MEMORY_POOL_DEFAULT)
+  explicit BufferBuilder(MemoryPool* pool = default_memory_pool())
       : pool_(pool),
         data_(/*ensure never null to make ubsan happy and avoid check penalties below*/
               &util::internal::non_null_filler),
 
         capacity_(0),
         size_(0) {}
+
+  /// \brief Constructs new Builder that will start using
+  /// the provided buffer until Finish/Reset are called.
+  /// The buffer is not resized.
+  explicit BufferBuilder(std::shared_ptr<ResizableBuffer> buffer,
+                         MemoryPool* pool = default_memory_pool())
+      : buffer_(std::move(buffer)),
+        pool_(pool),
+        data_(buffer_->mutable_data()),
+        capacity_(buffer_->capacity()),
+        size_(buffer_->size()) {}
 
   /// \brief Resize the buffer to the nearest multiple of 64 bytes
   ///
@@ -63,7 +73,7 @@ class ARROW_EXPORT BufferBuilder {
       return Status::OK();
     }
     if (buffer_ == NULLPTR) {
-      ARROW_RETURN_NOT_OK(AllocateResizableBuffer(pool_, new_capacity, &buffer_));
+      ARROW_ASSIGN_OR_RAISE(buffer_, AllocateResizableBuffer(new_capacity, pool_));
     } else {
       ARROW_RETURN_NOT_OK(buffer_->Resize(new_capacity, shrink_to_fit));
     }
@@ -145,7 +155,7 @@ class ARROW_EXPORT BufferBuilder {
     if (size_ != 0) buffer_->ZeroPadding();
     *out = buffer_;
     if (*out == NULLPTR) {
-      ARROW_RETURN_NOT_OK(AllocateBuffer(pool_, 0, out));
+      ARROW_ASSIGN_OR_RAISE(*out, AllocateBuffer(0, pool_));
     }
     Reset();
     return Status::OK();
@@ -184,8 +194,12 @@ class TypedBufferBuilder<
     T, typename std::enable_if<std::is_arithmetic<T>::value ||
                                std::is_standard_layout<T>::value>::type> {
  public:
-  explicit TypedBufferBuilder(MemoryPool* pool ARROW_MEMORY_POOL_DEFAULT)
+  explicit TypedBufferBuilder(MemoryPool* pool = default_memory_pool())
       : bytes_builder_(pool) {}
+
+  explicit TypedBufferBuilder(std::shared_ptr<ResizableBuffer> buffer,
+                              MemoryPool* pool = default_memory_pool())
+      : bytes_builder_(std::move(buffer), pool) {}
 
   Status Append(T value) {
     return bytes_builder_.Append(reinterpret_cast<uint8_t*>(&value), sizeof(T));
@@ -256,7 +270,7 @@ class TypedBufferBuilder<
 template <>
 class TypedBufferBuilder<bool> {
  public:
-  explicit TypedBufferBuilder(MemoryPool* pool ARROW_MEMORY_POOL_DEFAULT)
+  explicit TypedBufferBuilder(MemoryPool* pool = default_memory_pool())
       : bytes_builder_(pool) {}
 
   Status Append(bool value) {
@@ -374,5 +388,3 @@ class TypedBufferBuilder<bool> {
 };
 
 }  // namespace arrow
-
-#endif  // ARROW_BUFFER_BUILDER_H

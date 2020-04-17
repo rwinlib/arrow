@@ -95,18 +95,13 @@ enum class StatusCode : char {
   AlreadyExists = 45
 };
 
-#if defined(__clang__)
-// Only clang supports warn_unused_result as a type annotation.
-class ARROW_MUST_USE_RESULT ARROW_EXPORT Status;
-#endif
-
 /// \brief An opaque class that allows subsystems to retain
 /// additional information inside the Status.
 class ARROW_EXPORT StatusDetail {
  public:
   virtual ~StatusDetail() = default;
   /// \brief Return a unique id for the type of the StatusDetail
-  /// (effectively a poor man's substitude for RTTI).
+  /// (effectively a poor man's substitute for RTTI).
   virtual const char* type_id() const = 0;
   /// \brief Produce a human-readable description of this status.
   virtual std::string ToString() const = 0;
@@ -124,8 +119,8 @@ class ARROW_EXPORT StatusDetail {
 ///
 /// Additionally, if an error occurred, a specific error message is generally
 /// attached.
-class ARROW_EXPORT Status : public util::EqualityComparable<Status>,
-                            public util::ToStringOstreamable<Status> {
+class ARROW_MUST_USE_TYPE ARROW_EXPORT Status : public util::EqualityComparable<Status>,
+                                                public util::ToStringOstreamable<Status> {
  public:
   // Create a success status.
   Status() noexcept : state_(NULLPTR) {}
@@ -292,6 +287,7 @@ class ARROW_EXPORT Status : public util::EqualityComparable<Status>,
   }
 
   bool IsExecutionError() const { return code() == StatusCode::ExecutionError; }
+  bool IsAlreadyExists() const { return code() == StatusCode::AlreadyExists; }
 
   /// \brief Return a string representation of this status suitable for printing.
   ///
@@ -301,6 +297,7 @@ class ARROW_EXPORT Status : public util::EqualityComparable<Status>,
   /// \brief Return a string representation of the status code, without the message
   /// text or POSIX code information.
   std::string CodeAsString() const;
+  static std::string CodeAsString(StatusCode);
 
   /// \brief Return the StatusCode value attached to this status.
   StatusCode code() const { return ok() ? StatusCode::OK : state_->code; }
@@ -385,8 +382,11 @@ bool Status::Equals(const Status& s) const {
     return false;
   }
 
-  if (detail() != s.detail() && !(*detail() == *s.detail())) {
-    return false;
+  if (detail() != s.detail()) {
+    if ((detail() && !s.detail()) || (!detail() && s.detail())) {
+      return false;
+    }
+    return *detail() == *s.detail();
   }
 
   return code() == s.code() && message() == s.message();
@@ -431,6 +431,7 @@ namespace internal {
 // Extract Status from Status or Result<T>
 // Useful for the status check macros such as RETURN_NOT_OK.
 inline Status GenericToStatus(const Status& st) { return st; }
+inline Status GenericToStatus(Status&& st) { return std::move(st); }
 
 }  // namespace internal
 

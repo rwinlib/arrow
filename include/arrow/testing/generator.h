@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "arrow/record_batch.h"
@@ -118,6 +119,14 @@ class ARROW_EXPORT ConstantArrayGenerator {
   /// \return a generated Array
   static std::shared_ptr<arrow::Array> Float64(int64_t size, double value = 0);
 
+  /// \brief Generates a constant StringArray
+  ///
+  /// \param[in] size the size of the array to generate
+  /// \param[in] value to repeat
+  ///
+  /// \return a generated Array
+  static std::shared_ptr<arrow::Array> String(int64_t size, std::string value = "");
+
   template <typename ArrowType, typename CType = typename ArrowType::c_type>
   static std::shared_ptr<arrow::Array> Numeric(int64_t size, CType value = 0) {
     switch (ArrowType::type_id) {
@@ -179,6 +188,8 @@ class ARROW_EXPORT ConstantArrayGenerator {
         return Float32(size);
       case Type::DOUBLE:
         return Float64(size);
+      case Type::STRING:
+        return String(size);
       default:
         return nullptr;
     }
@@ -211,11 +222,9 @@ class ARROW_EXPORT ConstantArrayGenerator {
   /// \return a generated RecordBatchReader
   static std::shared_ptr<arrow::RecordBatchReader> Repeat(
       int64_t n_batch, const std::shared_ptr<RecordBatch> batch) {
-    std::vector<std::shared_ptr<RecordBatch>> batches{static_cast<size_t>(n_batch),
-                                                      batch};
-    std::shared_ptr<RecordBatchReader> reader;
-    ARROW_EXPECT_OK(MakeRecordBatchReader(batches, nullptr, &reader));
-    return reader;
+    std::vector<std::shared_ptr<RecordBatch>> batches(static_cast<size_t>(n_batch),
+                                                      batch);
+    return *MakeRecordBatchReader(batches);
   }
 
   /// \brief Generates a RecordBatchReader of zeroes batches

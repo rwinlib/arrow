@@ -34,6 +34,7 @@
 #include "arrow/array.h"
 #include "arrow/buffer.h"
 #include "arrow/builder.h"
+#include "arrow/status.h"
 #include "arrow/type.h"
 #include "arrow/type_traits.h"
 #include "arrow/util/bit_util.h"
@@ -236,7 +237,7 @@ class HashTable {
     return {&entries_[p.first], p.second};
   }
 
-  void Insert(Entry* entry, hash_t h, const Payload& payload) {
+  Status Insert(Entry* entry, hash_t h, const Payload& payload) {
     // Ensure entry is empty before inserting
     assert(!*entry);
     entry->h = FixHash(h);
@@ -245,8 +246,9 @@ class HashTable {
 
     if (ARROW_PREDICT_FALSE(NeedUpsizing())) {
       // Resize less frequently since it is expensive
-      DCHECK_OK(Upsize(capacity_ * kLoadFactor * 2));
+      return Upsize(capacity_ * kLoadFactor * 2);
     }
+    return Status::OK();
   }
 
   uint64_t size() const { return size_; }
@@ -403,7 +405,8 @@ class ScalarMemoTable : public MemoTable {
   }
 
   template <typename Func1, typename Func2>
-  int32_t GetOrInsert(const Scalar& value, Func1&& on_found, Func2&& on_not_found) {
+  Status GetOrInsert(const Scalar& value, Func1&& on_found, Func2&& on_not_found,
+                     int32_t* out_memo_index) {
     auto cmp_func = [value](const Payload* payload) -> bool {
       return ScalarHelper<Scalar, 0>::CompareScalars(value, payload->value);
     };
@@ -415,14 +418,16 @@ class ScalarMemoTable : public MemoTable {
       on_found(memo_index);
     } else {
       memo_index = size();
-      hash_table_.Insert(p.first, h, {value, memo_index});
+      RETURN_NOT_OK(hash_table_.Insert(p.first, h, {value, memo_index}));
       on_not_found(memo_index);
     }
-    return memo_index;
+    *out_memo_index = memo_index;
+    return Status::OK();
   }
 
-  int32_t GetOrInsert(const Scalar& value) {
-    return GetOrInsert(value, [](int32_t i) {}, [](int32_t i) {});
+  Status GetOrInsert(const Scalar& value, int32_t* out_memo_index) {
+    return GetOrInsert(
+        value, [](int32_t i) {}, [](int32_t i) {}, out_memo_index);
   }
 
   int32_t GetNull() const { return null_index_; }
@@ -513,23 +518,26 @@ class SmallScalarMemoTable : public MemoTable {
   }
 
   template <typename Func1, typename Func2>
-  int32_t GetOrInsert(const Scalar value, Func1&& on_found, Func2&& on_not_found) {
+  Status GetOrInsert(const Scalar value, Func1&& on_found, Func2&& on_not_found,
+                     int32_t* out_memo_index) {
     auto value_index = AsIndex(value);
     auto memo_index = value_to_index_[value_index];
     if (memo_index == kKeyNotFound) {
       memo_index = static_cast<int32_t>(index_to_value_.size());
       index_to_value_.push_back(value);
       value_to_index_[value_index] = memo_index;
-      assert(memo_index < cardinality + 1);
+      DCHECK_LT(memo_index, cardinality + 1);
       on_not_found(memo_index);
     } else {
       on_found(memo_index);
     }
-    return memo_index;
+    *out_memo_index = memo_index;
+    return Status::OK();
   }
 
-  int32_t GetOrInsert(const Scalar value) {
-    return GetOrInsert(value, [](int32_t i) {}, [](int32_t i) {});
+  Status GetOrInsert(const Scalar value, int32_t* out_memo_index) {
+    return GetOrInsert(
+        value, [](int32_t i) {}, [](int32_t i) {}, out_memo_index);
   }
 
   int32_t GetNull() const { return value_to_index_[cardinality]; }
@@ -583,8 +591,10 @@ class SmallScalarMemoTable : public MemoTable {
 // ----------------------------------------------------------------------
 // A memoization table for variable-sized binary data.
 
+template <typename BinaryBuilderT>
 class BinaryMemoTable : public MemoTable {
  public:
+  using builder_offset_type = typename BinaryBuilderT::offset_type;
   explicit BinaryMemoTable(MemoryPool* pool, int64_t entries = 0,
                            int64_t values_size = -1)
       : hash_table_(pool, static_cast<uint64_t>(entries)), binary_builder_(pool) {
@@ -593,7 +603,7 @@ class BinaryMemoTable : public MemoTable {
     DCHECK_OK(binary_builder_.ReserveData(data_size));
   }
 
-  int32_t Get(const void* data, int32_t length) const {
+  int32_t Get(const void* data, builder_offset_type length) const {
     hash_t h = ComputeStringHash<0>(data, length);
     auto p = Lookup(h, data, length);
     if (p.second) {
@@ -603,17 +613,13 @@ class BinaryMemoTable : public MemoTable {
     }
   }
 
-  int32_t Get(const std::string& value) const {
-    return Get(value.data(), static_cast<int32_t>(value.length()));
-  }
-
   int32_t Get(const util::string_view& value) const {
-    return Get(value.data(), static_cast<int32_t>(value.length()));
+    return Get(value.data(), static_cast<builder_offset_type>(value.length()));
   }
 
   template <typename Func1, typename Func2>
-  int32_t GetOrInsert(const void* data, int32_t length, Func1&& on_found,
-                      Func2&& on_not_found) {
+  Status GetOrInsert(const void* data, builder_offset_type length, Func1&& on_found,
+                     Func2&& on_not_found, int32_t* out_memo_index) {
     hash_t h = ComputeStringHash<0>(data, length);
     auto p = Lookup(h, data, length);
     int32_t memo_index;
@@ -623,39 +629,41 @@ class BinaryMemoTable : public MemoTable {
     } else {
       memo_index = size();
       // Insert string value
-      DCHECK_OK(binary_builder_.Append(static_cast<const char*>(data), length));
+      RETURN_NOT_OK(binary_builder_.Append(static_cast<const char*>(data), length));
       // Insert hash entry
-      hash_table_.Insert(const_cast<HashTableEntry*>(p.first), h, {memo_index});
+      RETURN_NOT_OK(
+          hash_table_.Insert(const_cast<HashTableEntry*>(p.first), h, {memo_index}));
 
       on_not_found(memo_index);
     }
-    return memo_index;
+    *out_memo_index = memo_index;
+    return Status::OK();
   }
 
   template <typename Func1, typename Func2>
-  int32_t GetOrInsert(const util::string_view& value, Func1&& on_found,
-                      Func2&& on_not_found) {
-    return GetOrInsert(value.data(), static_cast<int32_t>(value.length()),
-                       std::forward<Func1>(on_found), std::forward<Func2>(on_not_found));
+  Status GetOrInsert(const util::string_view& value, Func1&& on_found,
+                     Func2&& on_not_found, int32_t* out_memo_index) {
+    return GetOrInsert(value.data(), static_cast<builder_offset_type>(value.length()),
+                       std::forward<Func1>(on_found), std::forward<Func2>(on_not_found),
+                       out_memo_index);
   }
 
-  int32_t GetOrInsert(const void* data, int32_t length) {
-    return GetOrInsert(data, length, [](int32_t i) {}, [](int32_t i) {});
+  Status GetOrInsert(const void* data, builder_offset_type length,
+                     int32_t* out_memo_index) {
+    return GetOrInsert(
+        data, length, [](int32_t i) {}, [](int32_t i) {}, out_memo_index);
   }
 
-  int32_t GetOrInsert(const util::string_view& value) {
-    return GetOrInsert(value.data(), static_cast<int32_t>(value.length()));
-  }
-
-  int32_t GetOrInsert(const std::string& value) {
-    return GetOrInsert(value.data(), static_cast<int32_t>(value.length()));
+  Status GetOrInsert(const util::string_view& value, int32_t* out_memo_index) {
+    return GetOrInsert(value.data(), static_cast<builder_offset_type>(value.length()),
+                       out_memo_index);
   }
 
   int32_t GetNull() const { return null_index_; }
 
   template <typename Func1, typename Func2>
   int32_t GetOrInsertNull(Func1&& on_found, Func2&& on_not_found) {
-    auto memo_index = GetNull();
+    int32_t memo_index = GetNull();
     if (memo_index == kKeyNotFound) {
       memo_index = null_index_ = size();
       DCHECK_OK(binary_builder_.AppendNull());
@@ -683,12 +691,13 @@ class BinaryMemoTable : public MemoTable {
   void CopyOffsets(int32_t start, Offset* out_data) const {
     DCHECK_LE(start, size());
 
-    const int32_t* offsets = binary_builder_.offsets_data();
-    int32_t delta = offsets[start];
+    const builder_offset_type* offsets = binary_builder_.offsets_data();
+    const builder_offset_type delta = offsets[start];
     for (int32_t i = start; i < size(); ++i) {
-      int32_t adjusted_offset = offsets[i] - delta;
+      const builder_offset_type adjusted_offset = offsets[i] - delta;
       Offset cast_offset = static_cast<Offset>(adjusted_offset);
-      assert(static_cast<int32_t>(cast_offset) == adjusted_offset);  // avoid truncation
+      assert(static_cast<builder_offset_type>(cast_offset) ==
+             adjusted_offset);  // avoid truncation
       *out_data++ = cast_offset;
     }
 
@@ -711,8 +720,8 @@ class BinaryMemoTable : public MemoTable {
     DCHECK_LE(start, size());
 
     // The absolute byte offset of `start` value in the binary buffer.
-    int32_t offset = binary_builder_.offset(start);
-    auto length = binary_builder_.value_data_length() - static_cast<size_t>(offset);
+    const builder_offset_type offset = binary_builder_.offset(start);
+    const auto length = binary_builder_.value_data_length() - static_cast<size_t>(offset);
 
     if (out_size != -1) {
       assert(static_cast<int64_t>(length) <= out_size);
@@ -748,7 +757,7 @@ class BinaryMemoTable : public MemoTable {
       return;
     }
 
-    int32_t left_offset = binary_builder_.offset(start);
+    builder_offset_type left_offset = binary_builder_.offset(start);
 
     // Ensure that the data length is exactly missing width_size bytes to fit
     // in the expected output (n_values * width_size).
@@ -794,12 +803,12 @@ class BinaryMemoTable : public MemoTable {
   using HashTableType = HashTable<Payload>;
   using HashTableEntry = typename HashTable<Payload>::Entry;
   HashTableType hash_table_;
-  BinaryBuilder binary_builder_;
+  BinaryBuilderT binary_builder_;
 
   int32_t null_index_ = kKeyNotFound;
 
   std::pair<const HashTableEntry*, bool> Lookup(hash_t h, const void* data,
-                                                int32_t length) const {
+                                                builder_offset_type length) const {
     auto cmp_func = [=](const Payload* payload) {
       util::string_view lhs = binary_builder_.GetView(payload->memo_index);
       util::string_view rhs(static_cast<const char*>(data), length);
@@ -830,8 +839,14 @@ struct HashTraits<T, enable_if_t<has_c_type<T>::value && !is_8bit_int<T>::value>
 };
 
 template <typename T>
-struct HashTraits<T, enable_if_has_string_view<T>> {
-  using MemoTableType = BinaryMemoTable;
+struct HashTraits<T, enable_if_t<has_string_view<T>::value &&
+                                 !std::is_base_of<LargeBinaryType, T>::value>> {
+  using MemoTableType = BinaryMemoTable<BinaryBuilder>;
+};
+
+template <typename T>
+struct HashTraits<T, enable_if_t<std::is_base_of<LargeBinaryType, T>::value>> {
+  using MemoTableType = BinaryMemoTable<LargeBinaryBuilder>;
 };
 
 template <typename MemoTableType>

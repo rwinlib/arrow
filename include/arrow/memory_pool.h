@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_MEMORY_POOL_H
-#define ARROW_MEMORY_POOL_H
+#pragma once
 
 #include <atomic>
 #include <cstdint>
@@ -58,7 +57,7 @@ class MemoryPoolStats {
 
 }  // namespace internal
 
-/// Base class for memory allocation.
+/// Base class for memory allocation on the CPU.
 ///
 /// Besides tracking the number of allocated bytes, the allocator also should
 /// take care of the required 64-byte alignment.
@@ -175,5 +174,3 @@ Status jemalloc_set_decay_ms(int ms);
 ARROW_EXPORT Status mimalloc_memory_pool(MemoryPool** out);
 
 }  // namespace arrow
-
-#endif  // ARROW_MEMORY_POOL_H

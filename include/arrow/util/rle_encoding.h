@@ -18,11 +18,11 @@
 // Imported from Apache Impala (incubating) on 2016-01-29 and modified for use
 // in parquet-cpp, Arrow
 
-#ifndef ARROW_UTIL_RLE_ENCODING_H
-#define ARROW_UTIL_RLE_ENCODING_H
+#pragma once
 
-#include <math.h>
 #include <algorithm>
+#include <cmath>
+#include <vector>
 
 #include "arrow/util/bit_stream_utils.h"
 #include "arrow/util/bit_util.h"
@@ -123,15 +123,16 @@ class RleDecoder {
 
   /// Like GetBatch but the values are then decoded using the provided dictionary
   template <typename T>
-  int GetBatchWithDict(const T* dictionary, T* values, int batch_size);
+  int GetBatchWithDict(const T* dictionary, int32_t dictionary_length, T* values,
+                       int batch_size);
 
   /// Like GetBatchWithDict but add spacing for null entries
   ///
   /// Null entries will be zero-initialized in `values` to avoid leaking
   /// private data.
   template <typename T>
-  int GetBatchWithDictSpaced(const T* dictionary, T* values, int batch_size,
-                             int null_count, const uint8_t* valid_bits,
+  int GetBatchWithDictSpaced(const T* dictionary, int32_t dictionary_length, T* values,
+                             int batch_size, int null_count, const uint8_t* valid_bits,
                              int64_t valid_bits_offset);
 
  protected:
@@ -139,8 +140,8 @@ class RleDecoder {
   /// Number of bits needed to encode the value. Must be between 0 and 64.
   int bit_width_;
   uint64_t current_value_;
-  uint32_t repeat_count_;
-  uint32_t literal_count_;
+  int32_t repeat_count_;
+  int32_t literal_count_;
 
  private:
   /// Fills literal_count_ and repeat_count_ with next values. Returns false if there
@@ -180,8 +181,8 @@ class RleEncoder {
     int max_literal_run_size =
         1 +
         static_cast<int>(BitUtil::BytesForBits(MAX_VALUES_PER_LITERAL_RUN * bit_width));
-    /// Up to MAX_VLQ_BYTE_LEN indicator and a single 'bit_width' value.
-    int max_repeated_run_size = BitUtil::BitReader::MAX_VLQ_BYTE_LEN +
+    /// Up to kMaxVlqByteLength indicator and a single 'bit_width' value.
+    int max_repeated_run_size = BitUtil::BitReader::kMaxVlqByteLength +
                                 static_cast<int>(BitUtil::BytesForBits(bit_width));
     return std::max(max_literal_run_size, max_repeated_run_size);
   }
@@ -294,22 +295,28 @@ inline int RleDecoder::GetBatch(T* values, int batch_size) {
   DCHECK_GE(bit_width_, 0);
   int values_read = 0;
 
+  auto* out = values;
+
   while (values_read < batch_size) {
+    int remaining = batch_size - values_read;
+
     if (repeat_count_ > 0) {
-      int repeat_batch =
-          std::min(batch_size - values_read, static_cast<int>(repeat_count_));
-      std::fill(values + values_read, values + values_read + repeat_batch,
-                static_cast<T>(current_value_));
+      int repeat_batch = std::min(remaining, repeat_count_);
+      std::fill(out, out + repeat_batch, static_cast<T>(current_value_));
+
       repeat_count_ -= repeat_batch;
       values_read += repeat_batch;
+      out += repeat_batch;
     } else if (literal_count_ > 0) {
-      int literal_batch =
-          std::min(batch_size - values_read, static_cast<int>(literal_count_));
-      int actual_read =
-          bit_reader_.GetBatch(bit_width_, values + values_read, literal_batch);
-      DCHECK_EQ(actual_read, literal_batch);
+      int literal_batch = std::min(remaining, literal_count_);
+      int actual_read = bit_reader_.GetBatch(bit_width_, out, literal_batch);
+      if (actual_read != literal_batch) {
+        return values_read;
+      }
+
       literal_count_ -= literal_batch;
       values_read += literal_batch;
+      out += literal_batch;
     } else {
       if (!NextCounts<T>()) return values_read;
     }
@@ -325,10 +332,12 @@ inline int RleDecoder::GetBatchSpaced(int batch_size, int null_count,
   DCHECK_GE(bit_width_, 0);
   int values_read = 0;
   int remaining_nulls = null_count;
+  T zero = {};
 
   arrow::internal::BitmapReader bit_reader(valid_bits, valid_bits_offset, batch_size);
 
   while (values_read < batch_size) {
+    DCHECK_LT(bit_reader.position(), batch_size);
     bool is_valid = bit_reader.IsSet();
     bit_reader.Next();
 
@@ -342,6 +351,7 @@ inline int RleDecoder::GetBatchSpaced(int batch_size, int null_count,
         repeat_count_--;
 
         while (repeat_count_ > 0 && (values_read + repeat_batch) < batch_size) {
+          DCHECK_LT(bit_reader.position(), batch_size);
           if (bit_reader.IsSet()) {
             repeat_count_--;
           } else {
@@ -355,8 +365,8 @@ inline int RleDecoder::GetBatchSpaced(int batch_size, int null_count,
         out += repeat_batch;
         values_read += repeat_batch;
       } else if (literal_count_ > 0) {
-        int literal_batch = std::min(batch_size - values_read - remaining_nulls,
-                                     static_cast<int>(literal_count_));
+        int literal_batch =
+            std::min(batch_size - values_read - remaining_nulls, literal_count_);
 
         // Decode the literals
         constexpr int kBufferSize = 1024;
@@ -371,10 +381,12 @@ inline int RleDecoder::GetBatchSpaced(int batch_size, int null_count,
 
         // Read the first bitset to the end
         while (literals_read < literal_batch) {
+          DCHECK_LT(bit_reader.position(), batch_size);
           if (bit_reader.IsSet()) {
             *out = indices[literals_read];
             literals_read++;
           } else {
+            *out = zero;
             skipped++;
           }
           ++out;
@@ -385,6 +397,7 @@ inline int RleDecoder::GetBatchSpaced(int batch_size, int null_count,
         remaining_nulls -= skipped;
       }
     } else {
+      *out = zero;
       ++out;
       values_read++;
       remaining_nulls--;
@@ -394,33 +407,59 @@ inline int RleDecoder::GetBatchSpaced(int batch_size, int null_count,
   return values_read;
 }
 
+static inline bool IndexInRange(int32_t idx, int32_t dictionary_length) {
+  return idx >= 0 && idx < dictionary_length;
+}
+
 template <typename T>
-inline int RleDecoder::GetBatchWithDict(const T* dictionary, T* values, int batch_size) {
+inline int RleDecoder::GetBatchWithDict(const T* dictionary, int32_t dictionary_length,
+                                        T* values, int batch_size) {
   DCHECK_GE(bit_width_, 0);
   int values_read = 0;
 
+  auto* out = values;
+
   while (values_read < batch_size) {
+    int remaining = batch_size - values_read;
+
     if (repeat_count_ > 0) {
-      int repeat_batch =
-          std::min(batch_size - values_read, static_cast<int>(repeat_count_));
-      std::fill(values + values_read, values + values_read + repeat_batch,
-                dictionary[current_value_]);
+      auto idx = static_cast<int32_t>(current_value_);
+      if (ARROW_PREDICT_FALSE(!IndexInRange(idx, dictionary_length))) {
+        return values_read;
+      }
+      T val = dictionary[idx];
+
+      int repeat_batch = std::min(remaining, repeat_count_);
+      std::fill(out, out + repeat_batch, val);
+
+      /* Upkeep counters */
       repeat_count_ -= repeat_batch;
       values_read += repeat_batch;
+      out += repeat_batch;
     } else if (literal_count_ > 0) {
-      int literal_batch =
-          std::min(batch_size - values_read, static_cast<int>(literal_count_));
+      constexpr int kBufferSize = 1024;
+      int indices[kBufferSize];
 
-      const int buffer_size = 1024;
-      int indices[buffer_size];
-      literal_batch = std::min(literal_batch, buffer_size);
-      int actual_read = bit_reader_.GetBatch(bit_width_, &indices[0], literal_batch);
-      DCHECK_EQ(actual_read, literal_batch);
-      for (int i = 0; i < literal_batch; ++i) {
-        values[values_read + i] = dictionary[indices[i]];
+      int literal_batch = std::min(remaining, literal_count_);
+      literal_batch = std::min(literal_batch, kBufferSize);
+
+      int actual_read = bit_reader_.GetBatch(bit_width_, indices, literal_batch);
+      if (ARROW_PREDICT_FALSE(actual_read != literal_batch)) {
+        return values_read;
       }
+
+      for (int i = 0; i < literal_batch; ++i) {
+        int index = indices[i];
+        if (ARROW_PREDICT_FALSE(!IndexInRange(index, dictionary_length))) {
+          return values_read;
+        }
+        out[i] = dictionary[index];
+      }
+
+      /* Upkeep counters */
       literal_count_ -= literal_batch;
       values_read += literal_batch;
+      out += literal_batch;
     } else {
       if (!NextCounts<T>()) return values_read;
     }
@@ -430,8 +469,10 @@ inline int RleDecoder::GetBatchWithDict(const T* dictionary, T* values, int batc
 }
 
 template <typename T>
-inline int RleDecoder::GetBatchWithDictSpaced(const T* dictionary, T* out, int batch_size,
-                                              int null_count, const uint8_t* valid_bits,
+inline int RleDecoder::GetBatchWithDictSpaced(const T* dictionary,
+                                              int32_t dictionary_length, T* out,
+                                              int batch_size, int null_count,
+                                              const uint8_t* valid_bits,
                                               int64_t valid_bits_offset) {
   DCHECK_GE(bit_width_, 0);
   int values_read = 0;
@@ -441,6 +482,7 @@ inline int RleDecoder::GetBatchWithDictSpaced(const T* dictionary, T* out, int b
   arrow::internal::BitmapReader bit_reader(valid_bits, valid_bits_offset, batch_size);
 
   while (values_read < batch_size) {
+    DCHECK_LT(bit_reader.position(), batch_size);
     bool is_valid = bit_reader.IsSet();
     bit_reader.Next();
 
@@ -449,12 +491,17 @@ inline int RleDecoder::GetBatchWithDictSpaced(const T* dictionary, T* out, int b
         if (!NextCounts<T>()) return values_read;
       }
       if (repeat_count_ > 0) {
-        T value = dictionary[current_value_];
+        auto idx = static_cast<int32_t>(current_value_);
+        if (ARROW_PREDICT_FALSE(!IndexInRange(idx, dictionary_length))) {
+          return values_read;
+        }
+        T value = dictionary[idx];
         // The current index is already valid, we don't need to check that again
         int repeat_batch = 1;
         repeat_count_--;
 
         while (repeat_count_ > 0 && (values_read + repeat_batch) < batch_size) {
+          DCHECK_LT(bit_reader.position(), batch_size);
           if (bit_reader.IsSet()) {
             repeat_count_--;
           } else {
@@ -468,24 +515,34 @@ inline int RleDecoder::GetBatchWithDictSpaced(const T* dictionary, T* out, int b
         out += repeat_batch;
         values_read += repeat_batch;
       } else if (literal_count_ > 0) {
-        int literal_batch = std::min(batch_size - values_read - remaining_nulls,
-                                     static_cast<int>(literal_count_));
+        int literal_batch =
+            std::min(batch_size - values_read - remaining_nulls, literal_count_);
 
         // Decode the literals
         constexpr int kBufferSize = 1024;
         int indices[kBufferSize];
         literal_batch = std::min(literal_batch, kBufferSize);
         int actual_read = bit_reader_.GetBatch(bit_width_, &indices[0], literal_batch);
-        DCHECK_EQ(actual_read, literal_batch);
+        if (actual_read != literal_batch) return values_read;
 
         int skipped = 0;
         int literals_read = 1;
-        *out++ = dictionary[indices[0]];
+
+        int first_idx = indices[0];
+        if (ARROW_PREDICT_FALSE(!IndexInRange(first_idx, dictionary_length))) {
+          return values_read;
+        }
+        *out++ = dictionary[first_idx];
 
         // Read the first bitset to the end
         while (literals_read < literal_batch) {
+          DCHECK_LT(bit_reader.position(), batch_size);
           if (bit_reader.IsSet()) {
-            *out = dictionary[indices[literals_read]];
+            int idx = indices[literals_read];
+            if (ARROW_PREDICT_FALSE(!IndexInRange(idx, dictionary_length))) {
+              return values_read;
+            }
+            *out = dictionary[idx];
             literals_read++;
           } else {
             *out = zero;
@@ -513,21 +570,27 @@ template <typename T>
 bool RleDecoder::NextCounts() {
   // Read the next run's indicator int, it could be a literal or repeated run.
   // The int is encoded as a vlq-encoded value.
-  int32_t indicator_value = 0;
-  bool result = bit_reader_.GetVlqInt(&indicator_value);
-  if (!result) return false;
+  uint32_t indicator_value = 0;
+  if (!bit_reader_.GetVlqInt(&indicator_value)) return false;
 
   // lsb indicates if it is a literal run or repeated run
   bool is_literal = indicator_value & 1;
+  uint32_t count = indicator_value >> 1;
   if (is_literal) {
-    literal_count_ = (indicator_value >> 1) * 8;
+    if (ARROW_PREDICT_FALSE(count == 0 || count > static_cast<uint32_t>(INT32_MAX) / 8)) {
+      return false;
+    }
+    literal_count_ = count * 8;
   } else {
-    repeat_count_ = indicator_value >> 1;
+    if (ARROW_PREDICT_FALSE(count == 0 || count > static_cast<uint32_t>(INT32_MAX))) {
+      return false;
+    }
+    repeat_count_ = count;
     // XXX (ARROW-4018) this is not big-endian compatible
-    bool result =
-        bit_reader_.GetAligned<T>(static_cast<int>(BitUtil::CeilDiv(bit_width_, 8)),
-                                  reinterpret_cast<T*>(&current_value_));
-    DCHECK(result);
+    if (!bit_reader_.GetAligned<T>(static_cast<int>(BitUtil::CeilDiv(bit_width_, 8)),
+                                   reinterpret_cast<T*>(&current_value_))) {
+      return false;
+    }
   }
   return true;
 }
@@ -687,5 +750,3 @@ inline void RleEncoder::Clear() {
 
 }  // namespace util
 }  // namespace arrow
-
-#endif  // ARROW_UTIL_RLE_ENCODING_H

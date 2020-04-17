@@ -23,6 +23,7 @@
 
 #include "arrow/filesystem/filesystem.h"
 #include "arrow/util/macros.h"
+#include "arrow/util/uri.h"
 
 namespace Aws {
 namespace Auth {
@@ -60,6 +61,11 @@ struct ARROW_EXPORT S3Options {
   /// Configure with explicit access and secret key.
   void ConfigureAccessKey(const std::string& access_key, const std::string& secret_key);
 
+  std::string GetAccessKey() const;
+  std::string GetSecretKey() const;
+
+  bool Equals(const S3Options& other) const;
+
   /// \brief Initialize with default credentials provider chain
   ///
   /// This is recommended if you use the standard AWS environment variables
@@ -68,6 +74,11 @@ struct ARROW_EXPORT S3Options {
   /// \brief Initialize with explicit access and secret key
   static S3Options FromAccessKey(const std::string& access_key,
                                  const std::string& secret_key);
+
+  static Result<S3Options> FromUri(const ::arrow::internal::Uri& uri,
+                                   std::string* out_path = NULLPTR);
+  static Result<S3Options> FromUri(const std::string& uri,
+                                   std::string* out_path = NULLPTR);
 };
 
 /// S3-backed FileSystem implementation.
@@ -80,12 +91,15 @@ class ARROW_EXPORT S3FileSystem : public FileSystem {
   ~S3FileSystem() override;
 
   std::string type_name() const override { return "s3"; }
+  S3Options options() const;
+
+  bool Equals(const FileSystem& other) const override;
 
   /// \cond FALSE
-  using FileSystem::GetTargetStats;
+  using FileSystem::GetFileInfo;
   /// \endcond
-  Result<FileStats> GetTargetStats(const std::string& path) override;
-  Result<std::vector<FileStats>> GetTargetStats(const FileSelector& select) override;
+  Result<FileInfo> GetFileInfo(const std::string& path) override;
+  Result<std::vector<FileInfo>> GetFileInfo(const FileSelector& select) override;
 
   Status CreateDir(const std::string& path, bool recursive = true) override;
 
@@ -144,6 +158,11 @@ struct ARROW_EXPORT S3GlobalOptions {
 /// before using S3FileSystem.
 ARROW_EXPORT
 Status InitializeS3(const S3GlobalOptions& options);
+
+/// Ensure the S3 APIs are initialized, but only if not already done.
+/// If necessary, this will call InitializeS3() with some default options.
+ARROW_EXPORT
+Status EnsureS3Initialized();
 
 /// Shutdown the S3 APIs.
 ARROW_EXPORT

@@ -15,6 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#pragma once
+
 #include <memory>
 #include <utility>
 
@@ -45,9 +47,9 @@ static std::pair<DivideOrMultiply, int64_t> kTimestampConversionTable[4][4] = {
 //
 // This function takes care of properly transforming from one unit to another.
 //
-// \param[in] in, the input type. Must be TimestampType.
-// \param[in] out, the output type. Must be TimestampType.
-// \param[in] value, the input value.
+// \param[in] in the input type. Must be TimestampType.
+// \param[in] out the output type. Must be TimestampType.
+// \param[in] value the input value.
 //
 // \return The converted value, or an error.
 ARROW_EXPORT Result<int64_t> ConvertTimestampValue(const std::shared_ptr<DataType>& in,

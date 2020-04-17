@@ -17,8 +17,7 @@
 
 // Functions for comparing Arrow data structures
 
-#ifndef ARROW_COMPARE_H
-#define ARROW_COMPARE_H
+#pragma once
 
 #include <cstdint>
 #include <iosfwd>
@@ -64,6 +63,8 @@ class EqualOptions {
   std::ostream* diff_sink() const { return diff_sink_; }
 
   /// Return a new EqualOptions object with the "diff_sink" property changed.
+  /// This option will be ignored if diff formatting of the types of compared arrays is
+  /// not supported.
   EqualOptions diff_sink(std::ostream* diff_sink) const {
     auto res = EqualOptions(*this);
     res.diff_sink_ = diff_sink;
@@ -86,7 +87,8 @@ bool ARROW_EXPORT TensorEquals(const Tensor& left, const Tensor& right,
                                const EqualOptions& = EqualOptions::Defaults());
 
 /// EXPERIMENTAL: Returns true if the given sparse tensors are exactly equal
-bool ARROW_EXPORT SparseTensorEquals(const SparseTensor& left, const SparseTensor& right);
+bool ARROW_EXPORT SparseTensorEquals(const SparseTensor& left, const SparseTensor& right,
+                                     const EqualOptions& = EqualOptions::Defaults());
 
 /// Returns true if the arrays are approximately equal. For non-floating point
 /// types, this is equivalent to ArrayEquals(left, right)
@@ -112,5 +114,3 @@ bool ARROW_EXPORT TypeEquals(const DataType& left, const DataType& right,
 bool ARROW_EXPORT ScalarEquals(const Scalar& left, const Scalar& right);
 
 }  // namespace arrow
-
-#endif  // ARROW_COMPARE_H
