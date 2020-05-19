@@ -23,7 +23,7 @@
 #define PARQUET_VERSION_PATCH 1
 
 #define PARQUET_SO_VERSION "17"
-#define PARQUET_FULL_SO_VERSION "17.0.0"
+#define PARQUET_FULL_SO_VERSION "17.1.0"
 
 // define the parquet created by version
 #define CREATED_BY_VERSION "parquet-cpp version 1.5.1-SNAPSHOT"
