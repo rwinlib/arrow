@@ -15,12 +15,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#define ARROW_VERSION_MAJOR 0
-#define ARROW_VERSION_MINOR 17
-#define ARROW_VERSION_PATCH 1
+#define ARROW_VERSION_MAJOR 1
+#define ARROW_VERSION_MINOR 0
+#define ARROW_VERSION_PATCH 0
 #define ARROW_VERSION ((ARROW_VERSION_MAJOR * 1000) + ARROW_VERSION_MINOR) * 1000 + ARROW_VERSION_PATCH
 
-#define ARROW_SO_VERSION "17"
-#define ARROW_FULL_SO_VERSION "17.1.0"
+#define ARROW_VERSION_STRING "1.0.0"
+
+#define ARROW_SO_VERSION "100"
+#define ARROW_FULL_SO_VERSION "100.0.0"
+
+#define ARROW_CXX_COMPILER_ID "GNU"
+#define ARROW_CXX_COMPILER_VERSION "8.3.0"
+#define ARROW_CXX_COMPILER_FLAGS " -fdiagnostics-color=always -O3 -DNDEBUG"
+
+#define ARROW_GIT_ID "bf9e096063296482fc95dacc054cb530216f8feb"
+#define ARROW_GIT_DESCRIPTION ""
+
+#define ARROW_PACKAGE_KIND ""
 
 /* #undef GRPCPP_PP_INCLUDE */

@@ -1,6 +1,6 @@
-# Apache Arrow 0.17.1
+# Apache Arrow 1.0.0
 
-Backports for the R legacy toolchain [lib-4.9.3](lib-4.9.3) built with [rtools-backports](https://github.com/r-windows/rtools-backports/blob/master/mingw-w64-arrow/PKGBUILD).
+Combined bundle with builds for rtools40 [mingw-w64-arrow](https://github.com/r-windows/rtools-packages/blob/master/mingw-w64-arrow/PKGBUILD) and [backports](https://github.com/r-windows/rtools-backports/blob/master/mingw-w64-arrow/PKGBUILD) for the R legacy toolchain in [lib-4.9.3](lib-4.9.3)
 
 Now supports parquet (thrift) and snappy. Example flags to compile and link the R bindings:
 
@@ -19,7 +19,7 @@ PKG_LIBS = \
 To test this make sure you install the arrow package from a release tag:
 
 ```r
-remotes::install_github("apache/arrow/r@apache-arrow-0.17.1")
+remotes::install_github("apache/arrow/r@apache-arrow-1.0.0")
 ```
 
 To install R package from the arrow master branch you also would need to rebuild the master branch arrow C++ library from source.
