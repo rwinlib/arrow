@@ -87,11 +87,19 @@ ARROW_EXPORT
 std::vector<std::string> AncestorsFromBasePath(util::string_view base_path,
                                                util::string_view descendant);
 
+/// Given a vector of paths of directories which must be created, produce a the minimal
+/// subset for passing to CreateDir(recursive=true) by removing redundant parent
+/// directories
+ARROW_EXPORT
+std::vector<std::string> MinimalCreateDirSet(std::vector<std::string> dirs);
+
 // Join the components of an abstract path.
 template <class StringIt>
 std::string JoinAbstractPath(StringIt it, StringIt end) {
   std::string path;
   for (; it != end; ++it) {
+    if (it->empty()) continue;
+
     if (!path.empty()) {
       path += kSep;
     }

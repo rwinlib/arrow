@@ -121,7 +121,7 @@ class ARROW_EXPORT ListArray : public BaseListArray<ListType> {
   /// \param[in] values Array containing list values
   /// \param[in] pool MemoryPool in case new offsets array needs to be
   /// allocated because of null values
-  static Result<std::shared_ptr<Array>> FromArrays(
+  static Result<std::shared_ptr<ListArray>> FromArrays(
       const Array& offsets, const Array& values,
       MemoryPool* pool = default_memory_pool());
 
@@ -166,7 +166,7 @@ class ARROW_EXPORT LargeListArray : public BaseListArray<LargeListType> {
   /// \param[in] values Array containing list values
   /// \param[in] pool MemoryPool in case new offsets array needs to be
   /// allocated because of null values
-  static Result<std::shared_ptr<Array>> FromArrays(
+  static Result<std::shared_ptr<LargeListArray>> FromArrays(
       const Array& offsets, const Array& values,
       MemoryPool* pool = default_memory_pool());
 
@@ -328,8 +328,7 @@ class ARROW_EXPORT StructArray : public Array {
   /// The length and data type are automatically inferred from the arguments.
   /// There should be at least one child array.
   static Result<std::shared_ptr<StructArray>> Make(
-      const std::vector<std::shared_ptr<Array>>& children,
-      const std::vector<std::string>& field_names,
+      const ArrayVector& children, const std::vector<std::string>& field_names,
       std::shared_ptr<Buffer> null_bitmap = NULLPTR,
       int64_t null_count = kUnknownNullCount, int64_t offset = 0);
 
@@ -339,8 +338,7 @@ class ARROW_EXPORT StructArray : public Array {
   /// There should be at least one child array.  This method does not
   /// check that field types and child array types are consistent.
   static Result<std::shared_ptr<StructArray>> Make(
-      const std::vector<std::shared_ptr<Array>>& children,
-      const std::vector<std::shared_ptr<Field>>& fields,
+      const ArrayVector& children, const FieldVector& fields,
       std::shared_ptr<Buffer> null_bitmap = NULLPTR,
       int64_t null_count = kUnknownNullCount, int64_t offset = 0);
 
