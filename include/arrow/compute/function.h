@@ -41,7 +41,9 @@ namespace compute {
 
 /// \brief Base class for specifying options configuring a function's behavior,
 /// such as error handling.
-struct ARROW_EXPORT FunctionOptions {};
+struct ARROW_EXPORT FunctionOptions {
+  virtual ~FunctionOptions() = default;
+};
 
 /// \brief Contains the number of required arguments for the function.
 ///
@@ -75,6 +77,37 @@ struct ARROW_EXPORT Arity {
 
   /// If true, then the num_args is the minimum number of required arguments.
   bool is_varargs = false;
+};
+
+struct ARROW_EXPORT FunctionDoc {
+  /// \brief A one-line summary of the function, using a verb.
+  ///
+  /// For example, "Add two numeric arrays or scalars".
+  std::string summary;
+
+  /// \brief A detailed description of the function, meant to follow the summary.
+  std::string description;
+
+  /// \brief Symbolic names (identifiers) for the function arguments.
+  ///
+  /// Some bindings may use this to generate nicer function signatures.
+  std::vector<std::string> arg_names;
+
+  // TODO add argument descriptions?
+
+  /// \brief Name of the options class, if any.
+  std::string options_class;
+
+  FunctionDoc() = default;
+
+  FunctionDoc(std::string summary, std::string description,
+              std::vector<std::string> arg_names, std::string options_class = "")
+      : summary(std::move(summary)),
+        description(std::move(description)),
+        arg_names(std::move(arg_names)),
+        options_class(std::move(options_class)) {}
+
+  static const FunctionDoc& Empty();
 };
 
 /// \brief Base class for compute functions. Function implementations contain a
@@ -118,8 +151,18 @@ class ARROW_EXPORT Function {
   /// function accepts variable numbers of arguments.
   const Arity& arity() const { return arity_; }
 
+  /// \brief Return the function documentation
+  const FunctionDoc& doc() const { return *doc_; }
+
   /// \brief Returns the number of registered kernels for this function.
   virtual int num_kernels() const = 0;
+
+  /// \brief Return a kernel that can execute the function given the exact
+  /// argument types (without implicit type casts or scalar->array promotions).
+  ///
+  /// NB: This function is overridden in CastFunction.
+  virtual Result<const Kernel*> DispatchExact(
+      const std::vector<ValueDescr>& values) const = 0;
 
   /// \brief Execute the function eagerly with the passed input arguments with
   /// kernel dispatch, batch iteration, and memory allocation details taken
@@ -137,12 +180,15 @@ class ARROW_EXPORT Function {
   /// that default_options() is valid to pass to Execute as options.
   const FunctionOptions* default_options() const { return default_options_; }
 
+  virtual Status Validate() const;
+
  protected:
   Function(std::string name, Function::Kind kind, const Arity& arity,
-           const FunctionOptions* default_options)
+           const FunctionDoc* doc, const FunctionOptions* default_options)
       : name_(std::move(name)),
         kind_(kind),
         arity_(arity),
+        doc_(doc ? doc : &FunctionDoc::Empty()),
         default_options_(default_options) {}
 
   Status CheckArity(int passed_num_args) const;
@@ -150,6 +196,7 @@ class ARROW_EXPORT Function {
   std::string name_;
   Function::Kind kind_;
   Arity arity_;
+  const FunctionDoc* doc_;
   const FunctionOptions* default_options_ = NULLPTR;
 };
 
@@ -171,8 +218,8 @@ class FunctionImpl : public Function {
 
  protected:
   FunctionImpl(std::string name, Function::Kind kind, const Arity& arity,
-               const FunctionOptions* default_options)
-      : Function(std::move(name), kind, arity, default_options) {}
+               const FunctionDoc* doc, const FunctionOptions* default_options)
+      : Function(std::move(name), kind, arity, doc, default_options) {}
 
   std::vector<KernelType> kernels_;
 };
@@ -188,9 +235,9 @@ class ARROW_EXPORT ScalarFunction : public detail::FunctionImpl<ScalarKernel> {
  public:
   using KernelType = ScalarKernel;
 
-  ScalarFunction(std::string name, const Arity& arity,
+  ScalarFunction(std::string name, const Arity& arity, const FunctionDoc* doc,
                  const FunctionOptions* default_options = NULLPTR)
-      : detail::FunctionImpl<ScalarKernel>(std::move(name), Function::SCALAR, arity,
+      : detail::FunctionImpl<ScalarKernel>(std::move(name), Function::SCALAR, arity, doc,
                                            default_options) {}
 
   /// \brief Add a kernel with given input/output types, no required state
@@ -203,12 +250,8 @@ class ARROW_EXPORT ScalarFunction : public detail::FunctionImpl<ScalarKernel> {
   /// kernel's signature does not match the function's arity.
   Status AddKernel(ScalarKernel kernel);
 
-  /// \brief Return a kernel that can execute the function given the exact
-  /// argument types (without implicit type casts or scalar->array promotions).
-  ///
-  /// NB: This function is overridden in CastFunction.
-  virtual Result<const ScalarKernel*> DispatchExact(
-      const std::vector<ValueDescr>& values) const;
+  Result<const Kernel*> DispatchExact(
+      const std::vector<ValueDescr>& values) const override;
 };
 
 /// \brief A function that executes general array operations that may yield
@@ -219,9 +262,9 @@ class ARROW_EXPORT VectorFunction : public detail::FunctionImpl<VectorKernel> {
  public:
   using KernelType = VectorKernel;
 
-  VectorFunction(std::string name, const Arity& arity,
+  VectorFunction(std::string name, const Arity& arity, const FunctionDoc* doc,
                  const FunctionOptions* default_options = NULLPTR)
-      : detail::FunctionImpl<VectorKernel>(std::move(name), Function::VECTOR, arity,
+      : detail::FunctionImpl<VectorKernel>(std::move(name), Function::VECTOR, arity, doc,
                                            default_options) {}
 
   /// \brief Add a simple kernel with given input/output types, no required
@@ -234,9 +277,8 @@ class ARROW_EXPORT VectorFunction : public detail::FunctionImpl<VectorKernel> {
   /// kernel's signature does not match the function's arity.
   Status AddKernel(VectorKernel kernel);
 
-  /// \brief Return a kernel that can execute the function given the exact
-  /// argument types (without implicit type casts or scalar->array promotions)
-  Result<const VectorKernel*> DispatchExact(const std::vector<ValueDescr>& values) const;
+  Result<const Kernel*> DispatchExact(
+      const std::vector<ValueDescr>& values) const override;
 };
 
 class ARROW_EXPORT ScalarAggregateFunction
@@ -244,19 +286,17 @@ class ARROW_EXPORT ScalarAggregateFunction
  public:
   using KernelType = ScalarAggregateKernel;
 
-  ScalarAggregateFunction(std::string name, const Arity& arity,
+  ScalarAggregateFunction(std::string name, const Arity& arity, const FunctionDoc* doc,
                           const FunctionOptions* default_options = NULLPTR)
       : detail::FunctionImpl<ScalarAggregateKernel>(
-            std::move(name), Function::SCALAR_AGGREGATE, arity, default_options) {}
+            std::move(name), Function::SCALAR_AGGREGATE, arity, doc, default_options) {}
 
   /// \brief Add a kernel (function implementation). Returns error if the
   /// kernel's signature does not match the function's arity.
   Status AddKernel(ScalarAggregateKernel kernel);
 
-  /// \brief Return a kernel that can execute the function given the exact
-  /// argument types (without implicit type casts or scalar->array promotions)
-  Result<const ScalarAggregateKernel*> DispatchExact(
-      const std::vector<ValueDescr>& values) const;
+  Result<const Kernel*> DispatchExact(
+      const std::vector<ValueDescr>& values) const override;
 };
 
 /// \brief A function that dispatches to other functions. Must implement
@@ -271,14 +311,18 @@ class ARROW_EXPORT MetaFunction : public Function {
   Result<Datum> Execute(const std::vector<Datum>& args, const FunctionOptions* options,
                         ExecContext* ctx) const override;
 
+  Result<const Kernel*> DispatchExact(const std::vector<ValueDescr>&) const override {
+    return Status::NotImplemented("DispatchExact for a MetaFunction's Kernels");
+  }
+
  protected:
   virtual Result<Datum> ExecuteImpl(const std::vector<Datum>& args,
                                     const FunctionOptions* options,
                                     ExecContext* ctx) const = 0;
 
-  MetaFunction(std::string name, const Arity& arity,
+  MetaFunction(std::string name, const Arity& arity, const FunctionDoc* doc,
                const FunctionOptions* default_options = NULLPTR)
-      : Function(std::move(name), Function::META, arity, default_options) {}
+      : Function(std::move(name), Function::META, arity, doc, default_options) {}
 };
 
 /// @}

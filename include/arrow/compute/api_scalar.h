@@ -49,9 +49,28 @@ struct ARROW_EXPORT MatchSubstringOptions : public FunctionOptions {
   std::string pattern;
 };
 
+struct ARROW_EXPORT SplitOptions : public FunctionOptions {
+  explicit SplitOptions(int64_t max_splits = -1, bool reverse = false)
+      : max_splits(max_splits), reverse(reverse) {}
+
+  /// Maximum number of splits allowed, or unlimited when -1
+  int64_t max_splits;
+  /// Start splitting from the end of the string (only relevant when max_splits != -1)
+  bool reverse;
+};
+
+struct ARROW_EXPORT SplitPatternOptions : public SplitOptions {
+  explicit SplitPatternOptions(std::string pattern, int64_t max_splits = -1,
+                               bool reverse = false)
+      : SplitOptions(max_splits, reverse), pattern(std::move(pattern)) {}
+
+  /// The exact substring to look for inside input values.
+  std::string pattern;
+};
+
 /// Options for IsIn and IndexIn functions
 struct ARROW_EXPORT SetLookupOptions : public FunctionOptions {
-  explicit SetLookupOptions(Datum value_set, bool skip_nulls)
+  explicit SetLookupOptions(Datum value_set, bool skip_nulls = false)
       : value_set(std::move(value_set)), skip_nulls(skip_nulls) {}
 
   /// The set of values to look up input values into.
@@ -67,7 +86,7 @@ struct ARROW_EXPORT SetLookupOptions : public FunctionOptions {
 
 struct ARROW_EXPORT StrptimeOptions : public FunctionOptions {
   explicit StrptimeOptions(std::string format, TimeUnit::type unit)
-      : format(format), unit(unit) {}
+      : format(std::move(format)), unit(unit) {}
 
   std::string format;
   TimeUnit::type unit;
@@ -86,6 +105,13 @@ struct CompareOptions : public FunctionOptions {
   explicit CompareOptions(CompareOperator op) : op(op) {}
 
   enum CompareOperator op;
+};
+
+struct ARROW_EXPORT ProjectOptions : public FunctionOptions {
+  explicit ProjectOptions(std::vector<std::string> n) : field_names(std::move(n)) {}
+
+  /// Names for wrapped columns
+  std::vector<std::string> field_names;
 };
 
 /// @}
@@ -173,8 +199,8 @@ Result<Datum> Invert(const Datum& value, ExecContext* ctx = NULLPTR);
 /// \brief Element-wise AND of two boolean datums which always propagates nulls
 /// (null and false is null).
 ///
-/// \param[in] left left operand (array)
-/// \param[in] right right operand (array)
+/// \param[in] left left operand
+/// \param[in] right right operand
 /// \param[in] ctx the function execution context, optional
 /// \return the resulting datum
 ///
@@ -186,8 +212,8 @@ Result<Datum> And(const Datum& left, const Datum& right, ExecContext* ctx = NULL
 /// \brief Element-wise AND of two boolean datums with a Kleene truth table
 /// (null and false is false).
 ///
-/// \param[in] left left operand (array)
-/// \param[in] right right operand (array)
+/// \param[in] left left operand
+/// \param[in] right right operand
 /// \param[in] ctx the function execution context, optional
 /// \return the resulting datum
 ///
@@ -200,8 +226,8 @@ Result<Datum> KleeneAnd(const Datum& left, const Datum& right,
 /// \brief Element-wise OR of two boolean datums which always propagates nulls
 /// (null and true is null).
 ///
-/// \param[in] left left operand (array)
-/// \param[in] right right operand (array)
+/// \param[in] left left operand
+/// \param[in] right right operand
 /// \param[in] ctx the function execution context, optional
 /// \return the resulting datum
 ///
@@ -213,8 +239,8 @@ Result<Datum> Or(const Datum& left, const Datum& right, ExecContext* ctx = NULLP
 /// \brief Element-wise OR of two boolean datums with a Kleene truth table
 /// (null or true is true).
 ///
-/// \param[in] left left operand (array)
-/// \param[in] right right operand (array)
+/// \param[in] left left operand
+/// \param[in] right right operand
 /// \param[in] ctx the function execution context, optional
 /// \return the resulting datum
 ///
@@ -224,8 +250,8 @@ ARROW_EXPORT
 Result<Datum> KleeneOr(const Datum& left, const Datum& right, ExecContext* ctx = NULLPTR);
 
 /// \brief Element-wise XOR of two boolean datums
-/// \param[in] left left operand (array)
-/// \param[in] right right operand (array)
+/// \param[in] left left operand
+/// \param[in] right right operand
 /// \param[in] ctx the function execution context, optional
 /// \return the resulting datum
 ///
@@ -234,19 +260,48 @@ Result<Datum> KleeneOr(const Datum& left, const Datum& right, ExecContext* ctx =
 ARROW_EXPORT
 Result<Datum> Xor(const Datum& left, const Datum& right, ExecContext* ctx = NULLPTR);
 
+/// \brief Element-wise AND NOT of two boolean datums which always propagates nulls
+/// (null and not true is null).
+///
+/// \param[in] left left operand
+/// \param[in] right right operand
+/// \param[in] ctx the function execution context, optional
+/// \return the resulting datum
+///
+/// \since 3.0.0
+/// \note API not yet finalized
+ARROW_EXPORT
+Result<Datum> AndNot(const Datum& left, const Datum& right, ExecContext* ctx = NULLPTR);
+
+/// \brief Element-wise AND NOT of two boolean datums with a Kleene truth table
+/// (false and not null is false, null and not true is false).
+///
+/// \param[in] left left operand
+/// \param[in] right right operand
+/// \param[in] ctx the function execution context, optional
+/// \return the resulting datum
+///
+/// \since 3.0.0
+/// \note API not yet finalized
+ARROW_EXPORT
+Result<Datum> KleeneAndNot(const Datum& left, const Datum& right,
+                           ExecContext* ctx = NULLPTR);
+
 /// \brief IsIn returns true for each element of `values` that is contained in
 /// `value_set`
 ///
-/// If null occurs in left, if null count in right is not 0,
-/// it returns true, else returns null.
+/// Behaviour of nulls is governed by SetLookupOptions::skip_nulls.
 ///
 /// \param[in] values array-like input to look up in value_set
-/// \param[in] value_set either Array or ChunkedArray
+/// \param[in] options SetLookupOptions
 /// \param[in] ctx the function execution context, optional
 /// \return the resulting datum
 ///
 /// \since 1.0.0
 /// \note API not yet finalized
+ARROW_EXPORT
+Result<Datum> IsIn(const Datum& values, const SetLookupOptions& options,
+                   ExecContext* ctx = NULLPTR);
 ARROW_EXPORT
 Result<Datum> IsIn(const Datum& values, const Datum& value_set,
                    ExecContext* ctx = NULLPTR);
@@ -259,18 +314,18 @@ Result<Datum> IsIn(const Datum& values, const Datum& value_set,
 /// For example given values = [99, 42, 3, null] and
 /// value_set = [3, 3, 99], the output will be = [1, null, 0, null]
 ///
-/// Note: Null in the values is considered to match
-/// a null in the value_set array. For example given
-/// values = [99, 42, 3, null] and value_set = [3, 99, null],
-/// the output will be = [1, null, 0, 2]
+/// Behaviour of nulls is governed by SetLookupOptions::skip_nulls.
 ///
 /// \param[in] values array-like input
-/// \param[in] value_set either Array or ChunkedArray
+/// \param[in] options SetLookupOptions
 /// \param[in] ctx the function execution context, optional
 /// \return the resulting datum
 ///
 /// \since 1.0.0
 /// \note API not yet finalized
+ARROW_EXPORT
+Result<Datum> IndexIn(const Datum& values, const SetLookupOptions& options,
+                      ExecContext* ctx = NULLPTR);
 ARROW_EXPORT
 Result<Datum> IndexIn(const Datum& values, const Datum& value_set,
                       ExecContext* ctx = NULLPTR);
@@ -298,6 +353,18 @@ Result<Datum> IsValid(const Datum& values, ExecContext* ctx = NULLPTR);
 /// \note API not yet finalized
 ARROW_EXPORT
 Result<Datum> IsNull(const Datum& values, ExecContext* ctx = NULLPTR);
+
+/// \brief IsNan returns true for each element of `values` that is NaN,
+/// false otherwise
+///
+/// \param[in] values input to look for NaN
+/// \param[in] ctx the function execution context, optional
+/// \return the resulting datum
+///
+/// \since 3.0.0
+/// \note API not yet finalized
+ARROW_EXPORT
+Result<Datum> IsNan(const Datum& values, ExecContext* ctx = NULLPTR);
 
 /// \brief FillNull replaces each null element in `values`
 /// with `fill_value`

@@ -240,10 +240,18 @@ class DictionaryBuilderBase : public ArrayBuilder {
 
   /// \brief Append a decimal (only for Decimal128Type)
   template <typename T1 = T>
-  enable_if_decimal<T1, Status> Append(const Decimal128& value) {
+  enable_if_decimal128<T1, Status> Append(const Decimal128& value) {
     uint8_t data[16];
     value.ToBytes(data);
     return Append(data, 16);
+  }
+
+  /// \brief Append a decimal (only for Decimal128Type)
+  template <typename T1 = T>
+  enable_if_decimal256<T1, Status> Append(const Decimal256& value) {
+    uint8_t data[32];
+    value.ToBytes(data);
+    return Append(data, 32);
   }
 
   /// \brief Append a scalar null value
@@ -259,6 +267,18 @@ class DictionaryBuilderBase : public ArrayBuilder {
     null_count_ += length;
 
     return indices_builder_.AppendNulls(length);
+  }
+
+  Status AppendEmptyValue() final {
+    length_ += 1;
+
+    return indices_builder_.AppendEmptyValue();
+  }
+
+  Status AppendEmptyValues(int64_t length) final {
+    length_ += length;
+
+    return indices_builder_.AppendEmptyValues(length);
   }
 
   /// \brief Insert values into the dictionary's memo, but do not append any
@@ -435,6 +455,18 @@ class DictionaryBuilderBase<BuilderType, NullType> : public ArrayBuilder {
     null_count_ += length;
 
     return indices_builder_.AppendNulls(length);
+  }
+
+  Status AppendEmptyValue() final {
+    length_ += 1;
+
+    return indices_builder_.AppendEmptyValue();
+  }
+
+  Status AppendEmptyValues(int64_t length) final {
+    length_ += length;
+
+    return indices_builder_.AppendEmptyValues(length);
   }
 
   /// \brief Append a whole dense array to the builder

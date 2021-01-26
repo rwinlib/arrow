@@ -65,6 +65,9 @@ struct ARROW_EXPORT Scalar : public util::EqualityComparable<Scalar> {
   bool Equals(const Scalar& other,
               const EqualOptions& options = EqualOptions::Defaults()) const;
 
+  bool ApproxEquals(const Scalar& other,
+                    const EqualOptions& options = EqualOptions::Defaults()) const;
+
   struct ARROW_EXPORT Hash {
     size_t operator()(const Scalar& scalar) const { return hash(scalar); }
 
@@ -347,6 +350,17 @@ struct ARROW_EXPORT Decimal128Scalar : public Scalar {
   Decimal128 value;
 };
 
+struct ARROW_EXPORT Decimal256Scalar : public Scalar {
+  using Scalar::Scalar;
+  using TypeClass = Decimal256Type;
+  using ValueType = Decimal256;
+
+  Decimal256Scalar(Decimal256 value, std::shared_ptr<DataType> type)
+      : Scalar(std::move(type), true), value(value) {}
+
+  Decimal256 value;
+};
+
 struct ARROW_EXPORT BaseListScalar : public Scalar {
   using Scalar::Scalar;
   using ValueType = std::shared_ptr<Array>;
@@ -396,6 +410,9 @@ struct ARROW_EXPORT StructScalar : public Scalar {
 
   StructScalar(ValueType value, std::shared_ptr<DataType> type)
       : Scalar(std::move(type), true), value(std::move(value)) {}
+
+  static Result<std::shared_ptr<StructScalar>> Make(ValueType value,
+                                                    std::vector<std::string> field_names);
 
   explicit StructScalar(std::shared_ptr<DataType> type) : Scalar(std::move(type)) {}
 };

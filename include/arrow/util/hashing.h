@@ -690,7 +690,8 @@ class BinaryMemoTable : public MemoTable {
     DCHECK_LE(start, size());
 
     const builder_offset_type* offsets = binary_builder_.offsets_data();
-    const builder_offset_type delta = offsets[start];
+    const builder_offset_type delta =
+        start < binary_builder_.length() ? offsets[start] : 0;
     for (int32_t i = start; i < size(); ++i) {
       const builder_offset_type adjusted_offset = offsets[i] - delta;
       Offset cast_offset = static_cast<Offset>(adjusted_offset);
@@ -842,8 +843,8 @@ struct HashTraits<T, enable_if_t<has_string_view<T>::value &&
   using MemoTableType = BinaryMemoTable<BinaryBuilder>;
 };
 
-template <>
-struct HashTraits<Decimal128Type> {
+template <typename T>
+struct HashTraits<T, enable_if_decimal<T>> {
   using MemoTableType = BinaryMemoTable<BinaryBuilder>;
 };
 

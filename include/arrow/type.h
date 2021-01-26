@@ -126,7 +126,7 @@ class ARROW_EXPORT DataType : public detail::Fingerprintable {
   ARROW_DEPRECATED("Use field(i)")
   const std::shared_ptr<Field>& child(int i) const { return field(i); }
 
-  /// Returns the the child-field at index i.
+  /// Returns the child-field at index i.
   const std::shared_ptr<Field>& field(int i) const { return children_[i]; }
 
   ARROW_DEPRECATED("Use fields()")
@@ -180,6 +180,18 @@ class ARROW_EXPORT DataType : public detail::Fingerprintable {
 
 ARROW_EXPORT
 std::ostream& operator<<(std::ostream& os, const DataType& type);
+
+/// \brief Return the compatible physical data type
+///
+/// Some types may have distinct logical meanings but the exact same physical
+/// representation.  For example, TimestampType has Int64Type as a physical
+/// type (defined as TimestampType::PhysicalType).
+///
+/// The return value is as follows:
+/// - if a `PhysicalType` alias exists in the concrete type class, return
+///   an instance of `PhysicalType`.
+/// - otherwise, return the input type itself.
+std::shared_ptr<DataType> GetPhysicalType(const std::shared_ptr<DataType>& type);
 
 /// \brief Base class for all fixed-width data types
 class ARROW_EXPORT FixedWidthType : public DataType {
@@ -861,13 +873,17 @@ class ARROW_EXPORT StructType : public NestedType {
 /// \brief Base type class for (fixed-size) decimal data
 class ARROW_EXPORT DecimalType : public FixedSizeBinaryType {
  public:
-  explicit DecimalType(int32_t byte_width, int32_t precision, int32_t scale)
-      : FixedSizeBinaryType(byte_width, Type::DECIMAL),
-        precision_(precision),
-        scale_(scale) {}
+  explicit DecimalType(Type::type type_id, int32_t byte_width, int32_t precision,
+                       int32_t scale)
+      : FixedSizeBinaryType(byte_width, type_id), precision_(precision), scale_(scale) {}
 
   int32_t precision() const { return precision_; }
   int32_t scale() const { return scale_; }
+
+  /// \brief Returns the number of bytes needed for precision.
+  ///
+  /// precision must be >= 1
+  static int32_t DecimalSize(int32_t precision);
 
  protected:
   std::string ComputeFingerprint() const override;
@@ -879,7 +895,7 @@ class ARROW_EXPORT DecimalType : public FixedSizeBinaryType {
 /// \brief Concrete type class for 128-bit decimal data
 class ARROW_EXPORT Decimal128Type : public DecimalType {
  public:
-  static constexpr Type::type type_id = Type::DECIMAL;
+  static constexpr Type::type type_id = Type::DECIMAL128;
 
   static constexpr const char* type_name() { return "decimal"; }
 
@@ -894,6 +910,28 @@ class ARROW_EXPORT Decimal128Type : public DecimalType {
 
   static constexpr int32_t kMinPrecision = 1;
   static constexpr int32_t kMaxPrecision = 38;
+  static constexpr int32_t kByteWidth = 16;
+};
+
+/// \brief Concrete type class for 256-bit decimal data
+class ARROW_EXPORT Decimal256Type : public DecimalType {
+ public:
+  static constexpr Type::type type_id = Type::DECIMAL256;
+
+  static constexpr const char* type_name() { return "decimal256"; }
+
+  /// Decimal256Type constructor that aborts on invalid input.
+  explicit Decimal256Type(int32_t precision, int32_t scale);
+
+  /// Decimal256Type constructor that returns an error on invalid input.
+  static Result<std::shared_ptr<DataType>> Make(int32_t precision, int32_t scale);
+
+  std::string ToString() const override;
+  std::string name() const override { return "decimal256"; }
+
+  static constexpr int32_t kMinPrecision = 1;
+  static constexpr int32_t kMaxPrecision = 76;
+  static constexpr int32_t kByteWidth = 32;
 };
 
 /// \brief Concrete type class for union data
@@ -1329,6 +1367,12 @@ class ARROW_EXPORT DictionaryUnifier {
   /// after this is called
   virtual Status GetResult(std::shared_ptr<DataType>* out_type,
                            std::shared_ptr<Array>* out_dict) = 0;
+
+  /// \brief Return a unified dictionary with the given index type.  If
+  /// the index type is not large enough then an invalid status will be returned.
+  /// The unifier cannot be used after this is called
+  virtual Status GetResultWithIndexType(std::shared_ptr<DataType> index_type,
+                                        std::shared_ptr<Array>* out_dict) = 0;
 };
 
 // ----------------------------------------------------------------------
@@ -1348,9 +1392,7 @@ class ARROW_EXPORT DictionaryUnifier {
 /// FieldPaths provide a number of accessors for drilling down to potentially nested
 /// children. They are overloaded for convenience to support Schema (returns a field),
 /// DataType (returns a child field), Field (returns a child field of this field's type)
-/// Array (returns a child array), RecordBatch (returns a column), ChunkedArray (returns a
-/// ChunkedArray where each chunk is a child array of the corresponding original chunk)
-/// and Table (returns a column).
+/// Array (returns a child array), RecordBatch (returns a column).
 class ARROW_EXPORT FieldPath {
  public:
   FieldPath() = default;
@@ -1364,9 +1406,11 @@ class ARROW_EXPORT FieldPath {
   std::string ToString() const;
 
   size_t hash() const;
+  struct Hash {
+    size_t operator()(const FieldPath& path) const { return path.hash(); }
+  };
 
-  explicit operator bool() const { return !indices_.empty(); }
-  bool operator!() const { return indices_.empty(); }
+  bool empty() const { return indices_.empty(); }
   bool operator==(const FieldPath& other) const { return indices() == other.indices(); }
   bool operator!=(const FieldPath& other) const { return indices() != other.indices(); }
 
@@ -1383,11 +1427,10 @@ class ARROW_EXPORT FieldPath {
 
   /// \brief Retrieve the referenced column from a RecordBatch or Table
   Result<std::shared_ptr<Array>> Get(const RecordBatch& batch) const;
-  Result<std::shared_ptr<ChunkedArray>> Get(const Table& table) const;
 
-  /// \brief Retrieve the referenced child Array from an Array or ChunkedArray
+  /// \brief Retrieve the referenced child from an Array or ArrayData
   Result<std::shared_ptr<Array>> Get(const Array& array) const;
-  Result<std::shared_ptr<ChunkedArray>> Get(const ChunkedArray& array) const;
+  Result<std::shared_ptr<ArrayData>> Get(const ArrayData& data) const;
 
  private:
   std::vector<int> indices_;
@@ -1479,6 +1522,12 @@ class ARROW_EXPORT FieldRef {
   std::string ToString() const;
 
   size_t hash() const;
+  struct Hash {
+    size_t operator()(const FieldRef& ref) const { return ref.hash(); }
+  };
+
+  explicit operator bool() const { return Equals(FieldPath{}); }
+  bool operator!() const { return !Equals(FieldPath{}); }
 
   bool IsFieldPath() const { return util::holds_alternative<FieldPath>(impl_); }
   bool IsName() const { return util::holds_alternative<std::string>(impl_); }
@@ -1488,6 +1537,13 @@ class ARROW_EXPORT FieldRef {
     return true;
   }
 
+  const FieldPath* field_path() const {
+    return IsFieldPath() ? &util::get<FieldPath>(impl_) : NULLPTR;
+  }
+  const std::string* name() const {
+    return IsName() ? &util::get<std::string>(impl_) : NULLPTR;
+  }
+
   /// \brief Retrieve FieldPath of every child field which matches this FieldRef.
   std::vector<FieldPath> FindAll(const Schema& schema) const;
   std::vector<FieldPath> FindAll(const Field& field) const;
@@ -1495,10 +1551,9 @@ class ARROW_EXPORT FieldRef {
   std::vector<FieldPath> FindAll(const FieldVector& fields) const;
 
   /// \brief Convenience function which applies FindAll to arg's type or schema.
+  std::vector<FieldPath> FindAll(const ArrayData& array) const;
   std::vector<FieldPath> FindAll(const Array& array) const;
-  std::vector<FieldPath> FindAll(const ChunkedArray& array) const;
   std::vector<FieldPath> FindAll(const RecordBatch& batch) const;
-  std::vector<FieldPath> FindAll(const Table& table) const;
 
   /// \brief Convenience function: raise an error if matches is empty.
   template <typename T>
@@ -1568,16 +1623,16 @@ class ARROW_EXPORT FieldRef {
   template <typename T>
   Result<GetType<T>> GetOneOrNone(const T& root) const {
     ARROW_ASSIGN_OR_RAISE(auto match, FindOneOrNone(root));
-    if (match) {
-      return match.Get(root).ValueOrDie();
+    if (match.empty()) {
+      return static_cast<GetType<T>>(NULLPTR);
     }
-    return NULLPTR;
+    return match.Get(root).ValueOrDie();
   }
 
  private:
   void Flatten(std::vector<FieldRef> children);
 
-  util::variant<FieldPath, std::string, std::vector<FieldRef>> impl_;
+  util::Variant<FieldPath, std::string, std::vector<FieldRef>> impl_;
 
   ARROW_EXPORT friend void PrintTo(const FieldRef& ref, std::ostream* os);
 };
@@ -1631,7 +1686,7 @@ class ARROW_EXPORT Schema : public detail::Fingerprintable,
   /// \brief The custom key-value metadata, if any
   ///
   /// \return metadata may be null
-  std::shared_ptr<const KeyValueMetadata> metadata() const;
+  const std::shared_ptr<const KeyValueMetadata>& metadata() const;
 
   /// \brief Render a string representation of the schema suitable for debugging
   /// \param[in] show_metadata when true, if KeyValueMetadata is non-empty,
@@ -1699,18 +1754,18 @@ class ARROW_EXPORT SchemaBuilder {
   };
 
   /// \brief Construct an empty SchemaBuilder
-  /// `field_merge_options` is only effecitive when `conflict_policy` == `CONFLICT_MERGE`.
+  /// `field_merge_options` is only effective when `conflict_policy` == `CONFLICT_MERGE`.
   SchemaBuilder(
       ConflictPolicy conflict_policy = CONFLICT_APPEND,
       Field::MergeOptions field_merge_options = Field::MergeOptions::Defaults());
   /// \brief Construct a SchemaBuilder from a list of fields
-  /// `field_merge_options` is only effecitive when `conflict_policy` == `CONFLICT_MERGE`.
+  /// `field_merge_options` is only effective when `conflict_policy` == `CONFLICT_MERGE`.
   SchemaBuilder(
       std::vector<std::shared_ptr<Field>> fields,
       ConflictPolicy conflict_policy = CONFLICT_APPEND,
       Field::MergeOptions field_merge_options = Field::MergeOptions::Defaults());
   /// \brief Construct a SchemaBuilder from a schema, preserving the metadata
-  /// `field_merge_options` is only effecitive when `conflict_policy` == `CONFLICT_MERGE`.
+  /// `field_merge_options` is only effective when `conflict_policy` == `CONFLICT_MERGE`.
   SchemaBuilder(
       const std::shared_ptr<Schema>& schema,
       ConflictPolicy conflict_policy = CONFLICT_APPEND,
