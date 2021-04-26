@@ -23,6 +23,10 @@
 #include <memory>
 #include <string>
 
+#if defined(ARROW_HAVE_NEON) || defined(ARROW_HAVE_SSE4_2)
+#include <xsimd/xsimd.hpp>
+#endif
+
 #include "arrow/type_fwd.h"
 #include "arrow/util/macros.h"
 #include "arrow/util/simd.h"
@@ -240,54 +244,26 @@ inline bool ValidateAsciiSw(const uint8_t* data, int64_t len) {
   }
 }
 
-#ifdef ARROW_HAVE_NEON
+#if defined(ARROW_HAVE_NEON) || defined(ARROW_HAVE_SSE4_2)
 inline bool ValidateAsciiSimd(const uint8_t* data, int64_t len) {
+  using simd_batch = xsimd::batch<int8_t, 16>;
+
   if (len >= 32) {
+    const simd_batch zero(static_cast<int8_t>(0));
     const uint8_t* data2 = data + 16;
-    uint8x16_t or1 = vdupq_n_u8(0), or2 = or1;
+    simd_batch or1 = zero, or2 = zero;
 
     while (len >= 32) {
-      const uint8x16_t input1 = vld1q_u8(data);
-      const uint8x16_t input2 = vld1q_u8(data2);
-
-      or1 = vorrq_u8(or1, input1);
-      or2 = vorrq_u8(or2, input2);
-
+      or1 |= simd_batch(reinterpret_cast<const int8_t*>(data), xsimd::unaligned_mode{});
+      or2 |= simd_batch(reinterpret_cast<const int8_t*>(data2), xsimd::unaligned_mode{});
       data += 32;
       data2 += 32;
       len -= 32;
     }
 
-    or1 = vorrq_u8(or1, or2);
-    if (vmaxvq_u8(or1) >= 0x80) {
-      return false;
-    }
-  }
-
-  return ValidateAsciiSw(data, len);
-}
-#endif  // ARROW_HAVE_NEON
-
-#if defined(ARROW_HAVE_SSE4_2)
-inline bool ValidateAsciiSimd(const uint8_t* data, int64_t len) {
-  if (len >= 32) {
-    const uint8_t* data2 = data + 16;
-    __m128i or1 = _mm_set1_epi8(0), or2 = or1;
-
-    while (len >= 32) {
-      __m128i input1 = _mm_lddqu_si128((const __m128i*)data);
-      __m128i input2 = _mm_lddqu_si128((const __m128i*)data2);
-
-      or1 = _mm_or_si128(or1, input1);
-      or2 = _mm_or_si128(or2, input2);
-
-      data += 32;
-      data2 += 32;
-      len -= 32;
-    }
-
-    or1 = _mm_or_si128(or1, or2);
-    if (_mm_movemask_epi8(_mm_cmplt_epi8(or1, _mm_set1_epi8(0)))) {
+    // To test for upper bit in all bytes, test whether any of them is negative
+    or1 |= or2;
+    if (xsimd::any(or1 < zero)) {
       return false;
     }
   }
@@ -454,6 +430,73 @@ static inline bool UTF8Transform(const uint8_t* first, const uint8_t* last,
   }
   *destination = out;
   return true;
+}
+
+template <class Predicate>
+static inline bool UTF8FindIf(const uint8_t* first, const uint8_t* last,
+                              Predicate&& predicate, const uint8_t** position) {
+  const uint8_t* i = first;
+  while (i < last) {
+    uint32_t codepoint = 0;
+    const uint8_t* current = i;
+    if (ARROW_PREDICT_FALSE(!UTF8Decode(&i, &codepoint))) {
+      return false;
+    }
+    if (predicate(codepoint)) {
+      *position = current;
+      return true;
+    }
+  }
+  *position = last;
+  return true;
+}
+
+// Same semantics as std::find_if using reverse iterators with the return value
+// having the same semantics as std::reverse_iterator<..>.base()
+// A reverse iterator physically points to the next address, e.g.:
+// &*reverse_iterator(i) == &*(i + 1)
+template <class Predicate>
+static inline bool UTF8FindIfReverse(const uint8_t* first, const uint8_t* last,
+                                     Predicate&& predicate, const uint8_t** position) {
+  // converts to a normal point
+  const uint8_t* i = last - 1;
+  while (i >= first) {
+    uint32_t codepoint = 0;
+    const uint8_t* current = i;
+    if (ARROW_PREDICT_FALSE(!UTF8DecodeReverse(&i, &codepoint))) {
+      return false;
+    }
+    if (predicate(codepoint)) {
+      // converts normal pointer to 'reverse iterator semantics'.
+      *position = current + 1;
+      return true;
+    }
+  }
+  // similar to how an end pointer point to 1 beyond the last, reverse iterators point
+  // to the 'first' pointer to indicate out of range.
+  *position = first;
+  return true;
+}
+
+template <class UnaryFunction>
+static inline bool UTF8ForEach(const uint8_t* first, const uint8_t* last,
+                               UnaryFunction&& f) {
+  const uint8_t* i = first;
+  while (i < last) {
+    uint32_t codepoint = 0;
+    if (ARROW_PREDICT_FALSE(!UTF8Decode(&i, &codepoint))) {
+      return false;
+    }
+    f(codepoint);
+  }
+  return true;
+}
+
+template <class UnaryFunction>
+static inline bool UTF8ForEach(const std::string& s, UnaryFunction&& f) {
+  return UTF8ForEach(reinterpret_cast<const uint8_t*>(s.data()),
+                     reinterpret_cast<const uint8_t*>(s.data() + s.length()),
+                     std::forward<UnaryFunction>(f));
 }
 
 template <class UnaryPredicate>

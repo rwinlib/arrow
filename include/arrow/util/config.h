@@ -15,24 +15,32 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#define ARROW_VERSION_MAJOR 3
+#define ARROW_VERSION_MAJOR 4
 #define ARROW_VERSION_MINOR 0
 #define ARROW_VERSION_PATCH 0
 #define ARROW_VERSION ((ARROW_VERSION_MAJOR * 1000) + ARROW_VERSION_MINOR) * 1000 + ARROW_VERSION_PATCH
 
-#define ARROW_VERSION_STRING "3.0.0"
+#define ARROW_VERSION_STRING "4.0.0"
 
-#define ARROW_SO_VERSION "300"
-#define ARROW_FULL_SO_VERSION "300.0.0"
+#define ARROW_SO_VERSION "400"
+#define ARROW_FULL_SO_VERSION "400.0.0"
 
 #define ARROW_CXX_COMPILER_ID "GNU"
 #define ARROW_CXX_COMPILER_VERSION "8.3.0"
 #define ARROW_CXX_COMPILER_FLAGS " -fdiagnostics-color=always -O3 -DNDEBUG"
 
-#define ARROW_GIT_ID "7a1570a942ae43232bf82b5a2c7e271135d364e6"
+#define ARROW_GIT_ID "8422c43416578ede3ee29eda6eba099b79cf722c"
 #define ARROW_GIT_DESCRIPTION ""
 
 #define ARROW_PACKAGE_KIND ""
+
+#define ARROW_COMPUTE
+#define ARROW_CSV
+#define ARROW_DATASET
+#define ARROW_FILESYSTEM
+/* #undef ARROW_FLIGHT */
+#define ARROW_IPC
+#define ARROW_JSON
 
 #define ARROW_S3
 #define ARROW_USE_NATIVE_INT128

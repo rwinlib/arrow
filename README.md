@@ -1,4 +1,4 @@
-# Apache Arrow 2.0.0
+# Apache Arrow 4.0.0
 
 Combined bundle with builds for rtools40 [mingw-w64-arrow](https://github.com/r-windows/rtools-packages/blob/master/mingw-w64-arrow/PKGBUILD) and [backports](https://github.com/r-windows/rtools-backports/blob/master/mingw-w64-arrow/PKGBUILD) for the R legacy toolchain in [lib-4.9.3](lib-4.9.3)
 
@@ -19,7 +19,7 @@ PKG_LIBS = \
 To test this make sure you install the arrow package from a release tag:
 
 ```r
-remotes::install_github("apache/arrow/r@apache-arrow-2.0.0")
+remotes::install_github("apache/arrow/r@apache-arrow-4.0.0")
 ```
 
 To install R package from the arrow master branch you also would need to rebuild the master branch arrow C++ library from source.
