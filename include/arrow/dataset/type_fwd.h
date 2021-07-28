@@ -22,17 +22,12 @@
 #include <memory>
 #include <vector>
 
+#include "arrow/compute/type_fwd.h"  // IWYU pragma: export
 #include "arrow/dataset/visibility.h"
 #include "arrow/filesystem/type_fwd.h"  // IWYU pragma: export
 #include "arrow/type_fwd.h"             // IWYU pragma: export
 
 namespace arrow {
-namespace compute {
-
-class ExecContext;
-
-}  // namespace compute
-
 namespace dataset {
 
 class Dataset;
@@ -60,6 +55,8 @@ struct FileSystemDatasetWriteOptions;
 class InMemoryDataset;
 
 class CsvFileFormat;
+class CsvFileWriter;
+class CsvFileWriteOptions;
 struct CsvFragmentScanOptions;
 
 class IpcFileFormat;
@@ -73,13 +70,13 @@ class ParquetFragmentScanOptions;
 class ParquetFileWriter;
 class ParquetFileWriteOptions;
 
-class Expression;
-
 class Partitioning;
 class PartitioningFactory;
 class PartitioningOrFactory;
+struct KeyValuePartitioningOptions;
 class DirectoryPartitioning;
 class HivePartitioning;
+struct HivePartitioningOptions;
 
 struct ScanOptions;
 

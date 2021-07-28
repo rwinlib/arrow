@@ -19,41 +19,40 @@
 
 #pragma once
 
-#include <atomic>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "arrow/compute/type_fwd.h"
-#include "arrow/dataset/type_fwd.h"
-#include "arrow/dataset/visibility.h"
 #include "arrow/datum.h"
 #include "arrow/type_fwd.h"
 #include "arrow/util/variant.h"
 
 namespace arrow {
-namespace dataset {
+namespace compute {
 
 /// An unbound expression which maps a single Datum to another Datum.
 /// An expression is one of
 /// - A literal Datum.
 /// - A reference to a single (potentially nested) field of the input Datum.
 /// - A call to a compute function, with arguments specified by other Expressions.
-class ARROW_DS_EXPORT Expression {
+class ARROW_EXPORT Expression {
  public:
   struct Call {
     std::string function_name;
     std::vector<Expression> arguments;
-    std::shared_ptr<compute::FunctionOptions> options;
-    std::shared_ptr<std::atomic<size_t>> hash;
+    std::shared_ptr<FunctionOptions> options;
+    // Cached hash value
+    size_t hash;
 
     // post-Bind properties:
-    std::shared_ptr<compute::Function> function;
-    const compute::Kernel* kernel = NULLPTR;
-    std::shared_ptr<compute::KernelState> kernel_state;
+    std::shared_ptr<Function> function;
+    const Kernel* kernel = NULLPTR;
+    std::shared_ptr<KernelState> kernel_state;
     ValueDescr descr;
+
+    void ComputeHash();
   };
 
   std::string ToString() const;
@@ -66,8 +65,8 @@ class ARROW_DS_EXPORT Expression {
   /// Bind this expression to the given input type, looking up Kernels and field types.
   /// Some expression simplification may be performed and implicit casts will be inserted.
   /// Any state necessary for execution will be initialized and returned.
-  Result<Expression> Bind(ValueDescr in, compute::ExecContext* = NULLPTR) const;
-  Result<Expression> Bind(const Schema& in_schema, compute::ExecContext* = NULLPTR) const;
+  Result<Expression> Bind(const ValueDescr& in, ExecContext* = NULLPTR) const;
+  Result<Expression> Bind(const Schema& in_schema, ExecContext* = NULLPTR) const;
 
   // XXX someday
   // Clone all KernelState in this bound expression. If any function referenced by this
@@ -110,8 +109,12 @@ class ARROW_DS_EXPORT Expression {
 
   struct Parameter {
     FieldRef ref;
+
+    // post-bind properties
     ValueDescr descr;
+    int index;
   };
+  const Parameter* parameter() const;
 
   Expression() = default;
   explicit Expression(Call call);
@@ -122,9 +125,9 @@ class ARROW_DS_EXPORT Expression {
   using Impl = util::Variant<Datum, Parameter, Call>;
   std::shared_ptr<Impl> impl_;
 
-  ARROW_DS_EXPORT friend bool Identical(const Expression& l, const Expression& r);
+  ARROW_EXPORT friend bool Identical(const Expression& l, const Expression& r);
 
-  ARROW_DS_EXPORT friend void PrintTo(const Expression&, std::ostream*);
+  ARROW_EXPORT friend void PrintTo(const Expression&, std::ostream*);
 };
 
 inline bool operator==(const Expression& l, const Expression& r) { return l.Equals(r); }
@@ -132,7 +135,7 @@ inline bool operator!=(const Expression& l, const Expression& r) { return !l.Equ
 
 // Factories
 
-ARROW_DS_EXPORT
+ARROW_EXPORT
 Expression literal(Datum lit);
 
 template <typename Arg>
@@ -140,15 +143,15 @@ Expression literal(Arg&& arg) {
   return literal(Datum(std::forward<Arg>(arg)));
 }
 
-ARROW_DS_EXPORT
+ARROW_EXPORT
 Expression field_ref(FieldRef ref);
 
-ARROW_DS_EXPORT
+ARROW_EXPORT
 Expression call(std::string function, std::vector<Expression> arguments,
-                std::shared_ptr<compute::FunctionOptions> options = NULLPTR);
+                std::shared_ptr<FunctionOptions> options = NULLPTR);
 
-template <typename Options, typename = typename std::enable_if<std::is_base_of<
-                                compute::FunctionOptions, Options>::value>::type>
+template <typename Options, typename = typename std::enable_if<
+                                std::is_base_of<FunctionOptions, Options>::value>::type>
 Expression call(std::string function, std::vector<Expression> arguments,
                 Options options) {
   return call(std::move(function), std::move(arguments),
@@ -156,12 +159,17 @@ Expression call(std::string function, std::vector<Expression> arguments,
 }
 
 /// Assemble a list of all fields referenced by an Expression at any depth.
-ARROW_DS_EXPORT
+ARROW_EXPORT
 std::vector<FieldRef> FieldsInExpression(const Expression&);
 
+/// Check if the expression references any fields.
+ARROW_EXPORT
+bool ExpressionHasFieldRefs(const Expression&);
+
 /// Assemble a mapping from field references to known values.
-ARROW_DS_EXPORT
-Result<std::unordered_map<FieldRef, Datum, FieldRef::Hash>> ExtractKnownFieldValues(
+struct ARROW_EXPORT KnownFieldValues;
+ARROW_EXPORT
+Result<KnownFieldValues> ExtractKnownFieldValues(
     const Expression& guaranteed_true_predicate);
 
 /// \defgroup expression-passes Functions for modification of Expressions
@@ -179,25 +187,25 @@ Result<std::unordered_map<FieldRef, Datum, FieldRef::Hash>> ExtractKnownFieldVal
 /// Weak canonicalization which establishes guarantees for subsequent passes. Even
 /// equivalent Expressions may result in different canonicalized expressions.
 /// TODO this could be a strong canonicalization
-ARROW_DS_EXPORT
-Result<Expression> Canonicalize(Expression, compute::ExecContext* = NULLPTR);
+ARROW_EXPORT
+Result<Expression> Canonicalize(Expression, ExecContext* = NULLPTR);
 
 /// Simplify Expressions based on literal arguments (for example, add(null, x) will always
 /// be null so replace the call with a null literal). Includes early evaluation of all
 /// calls whose arguments are entirely literal.
-ARROW_DS_EXPORT
+ARROW_EXPORT
 Result<Expression> FoldConstants(Expression);
 
 /// Simplify Expressions by replacing with known values of the fields which it references.
-ARROW_DS_EXPORT
-Result<Expression> ReplaceFieldsWithKnownValues(
-    const std::unordered_map<FieldRef, Datum, FieldRef::Hash>& known_values, Expression);
+ARROW_EXPORT
+Result<Expression> ReplaceFieldsWithKnownValues(const KnownFieldValues& known_values,
+                                                Expression);
 
 /// Simplify an expression by replacing subexpressions based on a guarantee:
 /// a boolean expression which is guaranteed to evaluate to `true`. For example, this is
 /// used to remove redundant function calls from a filter expression or to replace a
 /// reference to a constant-value field with a literal.
-ARROW_DS_EXPORT
+ARROW_EXPORT
 Result<Expression> SimplifyWithGuarantee(Expression,
                                          const Expression& guaranteed_true_predicate);
 
@@ -205,46 +213,57 @@ Result<Expression> SimplifyWithGuarantee(Expression,
 
 // Execution
 
-/// Execute a scalar expression against the provided state and input Datum. This
+/// Create an ExecBatch suitable for passing to ExecuteScalarExpression() from a
+/// RecordBatch which may have missing or incorrectly ordered columns.
+/// Missing fields will be replaced with null scalars.
+ARROW_EXPORT Result<ExecBatch> MakeExecBatch(const Schema& full_schema,
+                                             const Datum& partial);
+
+/// Execute a scalar expression against the provided state and input ExecBatch. This
 /// expression must be bound.
-ARROW_DS_EXPORT
-Result<Datum> ExecuteScalarExpression(const Expression&, const Datum& input,
-                                      compute::ExecContext* = NULLPTR);
+ARROW_EXPORT
+Result<Datum> ExecuteScalarExpression(const Expression&, const ExecBatch& input,
+                                      ExecContext* = NULLPTR);
+
+/// Convenience function for invoking against a RecordBatch
+ARROW_EXPORT
+Result<Datum> ExecuteScalarExpression(const Expression&, const Schema& full_schema,
+                                      const Datum& partial_input, ExecContext* = NULLPTR);
 
 // Serialization
 
-ARROW_DS_EXPORT
+ARROW_EXPORT
 Result<std::shared_ptr<Buffer>> Serialize(const Expression&);
 
-ARROW_DS_EXPORT
+ARROW_EXPORT
 Result<Expression> Deserialize(std::shared_ptr<Buffer>);
 
 // Convenience aliases for factories
 
-ARROW_DS_EXPORT Expression project(std::vector<Expression> values,
-                                   std::vector<std::string> names);
+ARROW_EXPORT Expression project(std::vector<Expression> values,
+                                std::vector<std::string> names);
 
-ARROW_DS_EXPORT Expression equal(Expression lhs, Expression rhs);
+ARROW_EXPORT Expression equal(Expression lhs, Expression rhs);
 
-ARROW_DS_EXPORT Expression not_equal(Expression lhs, Expression rhs);
+ARROW_EXPORT Expression not_equal(Expression lhs, Expression rhs);
 
-ARROW_DS_EXPORT Expression less(Expression lhs, Expression rhs);
+ARROW_EXPORT Expression less(Expression lhs, Expression rhs);
 
-ARROW_DS_EXPORT Expression less_equal(Expression lhs, Expression rhs);
+ARROW_EXPORT Expression less_equal(Expression lhs, Expression rhs);
 
-ARROW_DS_EXPORT Expression greater(Expression lhs, Expression rhs);
+ARROW_EXPORT Expression greater(Expression lhs, Expression rhs);
 
-ARROW_DS_EXPORT Expression greater_equal(Expression lhs, Expression rhs);
+ARROW_EXPORT Expression greater_equal(Expression lhs, Expression rhs);
 
-ARROW_DS_EXPORT Expression is_null(Expression lhs);
+ARROW_EXPORT Expression is_null(Expression lhs);
 
-ARROW_DS_EXPORT Expression is_valid(Expression lhs);
+ARROW_EXPORT Expression is_valid(Expression lhs);
 
-ARROW_DS_EXPORT Expression and_(Expression lhs, Expression rhs);
-ARROW_DS_EXPORT Expression and_(const std::vector<Expression>&);
-ARROW_DS_EXPORT Expression or_(Expression lhs, Expression rhs);
-ARROW_DS_EXPORT Expression or_(const std::vector<Expression>&);
-ARROW_DS_EXPORT Expression not_(Expression operand);
+ARROW_EXPORT Expression and_(Expression lhs, Expression rhs);
+ARROW_EXPORT Expression and_(const std::vector<Expression>&);
+ARROW_EXPORT Expression or_(Expression lhs, Expression rhs);
+ARROW_EXPORT Expression or_(const std::vector<Expression>&);
+ARROW_EXPORT Expression not_(Expression operand);
 
-}  // namespace dataset
+}  // namespace compute
 }  // namespace arrow

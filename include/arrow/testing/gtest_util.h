@@ -41,6 +41,7 @@
 #include "arrow/type_traits.h"
 #include "arrow/util/bit_util.h"
 #include "arrow/util/macros.h"
+#include "arrow/util/string_builder.h"
 #include "arrow/util/type_fwd.h"
 
 // NOTE: failing must be inline in the macros below, to get correct file / line number
@@ -67,16 +68,13 @@
     ASSERT_EQ((message), _st.ToString());                                             \
   } while (false)
 
-#define EXPECT_RAISES_WITH_MESSAGE_THAT(ENUM, matcher, expr)                          \
-  do {                                                                                \
-    auto _res = (expr);                                                               \
-    ::arrow::Status _st = ::arrow::internal::GenericToStatus(_res);                   \
-    if (!_st.Is##ENUM()) {                                                            \
-      FAIL() << "Expected '" ARROW_STRINGIFY(expr) "' to fail with " ARROW_STRINGIFY( \
-                    ENUM) ", but got "                                                \
-             << _st.ToString();                                                       \
-    }                                                                                 \
-    EXPECT_THAT(_st.ToString(), (matcher));                                           \
+#define EXPECT_RAISES_WITH_MESSAGE_THAT(ENUM, matcher, expr)                             \
+  do {                                                                                   \
+    auto _res = (expr);                                                                  \
+    ::arrow::Status _st = ::arrow::internal::GenericToStatus(_res);                      \
+    EXPECT_TRUE(_st.Is##ENUM()) << "Expected '" ARROW_STRINGIFY(expr) "' to fail with "  \
+                                << ARROW_STRINGIFY(ENUM) ", but got " << _st.ToString(); \
+    EXPECT_THAT(_st.ToString(), (matcher));                                              \
   } while (false)
 
 #define EXPECT_RAISES_WITH_CODE_AND_MESSAGE_THAT(code, matcher, expr) \
@@ -100,6 +98,10 @@
     EXPECT_TRUE(_st.ok()) << "'" ARROW_STRINGIFY(expr) "' failed with " \
                           << _st.ToString();                            \
   } while (false)
+
+#define ASSERT_NOT_OK(expr)                                                         \
+  for (::arrow::Status _st = ::arrow::internal::GenericToStatus((expr)); _st.ok();) \
+  FAIL() << "'" ARROW_STRINGIFY(expr) "' did not failed" << _st.ToString()
 
 #define ABORT_NOT_OK(expr)                                          \
   do {                                                              \
@@ -134,6 +136,11 @@
     ASSERT_OK_AND_ASSIGN(auto _actual, (expr)); \
     ASSERT_EQ(expected, _actual);               \
   } while (0)
+
+// A generalized version of GTest's SCOPED_TRACE that takes arbitrary arguments.
+//   ARROW_SCOPED_TRACE("some variable = ", some_variable, ...)
+
+#define ARROW_SCOPED_TRACE(...) SCOPED_TRACE(::arrow::util::StringBuilder(__VA_ARGS__))
 
 namespace arrow {
 
@@ -198,6 +205,9 @@ ARROW_TESTING_EXPORT void AssertChunkedEqual(const ChunkedArray& actual,
 // Like ChunkedEqual, but permits different chunk layout
 ARROW_TESTING_EXPORT void AssertChunkedEquivalent(const ChunkedArray& expected,
                                                   const ChunkedArray& actual);
+ARROW_TESTING_EXPORT void AssertChunkedApproxEquivalent(
+    const ChunkedArray& expected, const ChunkedArray& actual,
+    const EqualOptions& equal_options = EqualOptions::Defaults());
 ARROW_TESTING_EXPORT void AssertBufferEqual(const Buffer& buffer,
                                             const std::vector<uint8_t>& expected);
 ARROW_TESTING_EXPORT void AssertBufferEqual(const Buffer& buffer,
@@ -245,6 +255,9 @@ ARROW_TESTING_EXPORT void AssertTablesEqual(const Table& expected, const Table& 
 
 ARROW_TESTING_EXPORT void AssertDatumsEqual(const Datum& expected, const Datum& actual,
                                             bool verbose = false);
+ARROW_TESTING_EXPORT void AssertDatumsApproxEqual(
+    const Datum& expected, const Datum& actual, bool verbose = false,
+    const EqualOptions& options = EqualOptions::Defaults());
 
 template <typename C_TYPE>
 void AssertNumericDataEqual(const C_TYPE* raw_data,
@@ -268,6 +281,7 @@ ARROW_TESTING_EXPORT void AssertZeroPadded(const Array& array);
 
 // Check if the valid buffer bytes are initialized
 // and cause valgrind warnings otherwise.
+ARROW_TESTING_EXPORT void TestInitialized(const ArrayData& array);
 ARROW_TESTING_EXPORT void TestInitialized(const Array& array);
 
 template <typename BuilderType>
@@ -299,6 +313,10 @@ std::shared_ptr<RecordBatch> RecordBatchFromJSON(const std::shared_ptr<Schema>&,
 ARROW_TESTING_EXPORT
 std::shared_ptr<ChunkedArray> ChunkedArrayFromJSON(const std::shared_ptr<DataType>&,
                                                    const std::vector<std::string>& json);
+
+ARROW_TESTING_EXPORT
+std::shared_ptr<Scalar> ScalarFromJSON(const std::shared_ptr<DataType>&,
+                                       util::string_view json);
 
 ARROW_TESTING_EXPORT
 std::shared_ptr<Table> TableFromJSON(const std::shared_ptr<Schema>&,
@@ -432,6 +450,14 @@ inline void BitmapFromVector(const std::vector<T>& is_valid,
                              std::shared_ptr<Buffer>* out) {
   ASSERT_OK(GetBitmapFromVector(is_valid, out));
 }
+
+// Given an array, return a new identical array except for one validity bit
+// set to a new value.
+// This is useful to force the underlying "value" of null entries to otherwise
+// invalid data and check that errors don't get reported.
+ARROW_TESTING_EXPORT
+std::shared_ptr<Array> TweakValidityBit(const std::shared_ptr<Array>& array,
+                                        int64_t index, bool validity);
 
 ARROW_TESTING_EXPORT
 void SleepFor(double seconds);

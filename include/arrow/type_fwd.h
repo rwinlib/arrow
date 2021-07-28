@@ -37,10 +37,10 @@ class Result;
 
 class Status;
 
-namespace detail {
+namespace internal {
 struct Empty;
-}
-template <typename T = detail::Empty>
+}  // namespace internal
+template <typename T = internal::Empty>
 class Future;
 
 namespace util {
@@ -81,6 +81,7 @@ class RecordBatchReader;
 class Table;
 
 struct Datum;
+struct ValueDescr;
 
 using ChunkedArrayVector = std::vector<std::shared_ptr<ChunkedArray>>;
 using RecordBatchVector = std::vector<std::shared_ptr<RecordBatch>>;
@@ -448,8 +449,8 @@ std::shared_ptr<DataType> fixed_size_binary(int32_t byte_width);
 
 /// \brief Create a DecimalType instance depending on the precision
 ///
-/// If the precision is greater than 38, a Decimal128Type is returned,
-/// otherwise a Decimal256Type.
+/// If the precision is greater than 38, a Decimal256Type is returned,
+/// otherwise a Decimal128Type.
 ARROW_EXPORT
 std::shared_ptr<DataType> decimal(int32_t precision, int32_t scale);
 

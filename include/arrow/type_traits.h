@@ -233,6 +233,7 @@ struct TypeTraits<MonthIntervalType> {
   using ArrayType = MonthIntervalArray;
   using BuilderType = MonthIntervalBuilder;
   using ScalarType = MonthIntervalScalar;
+  using CType = MonthIntervalType::c_type;
 
   static constexpr int64_t bytes_required(int64_t elements) {
     return elements * static_cast<int64_t>(sizeof(int32_t));
@@ -838,6 +839,17 @@ static inline bool is_floating(Type::type type_id) {
     case Type::HALF_FLOAT:
     case Type::FLOAT:
     case Type::DOUBLE:
+      return true;
+    default:
+      break;
+  }
+  return false;
+}
+
+static inline bool is_decimal(Type::type type_id) {
+  switch (type_id) {
+    case Type::DECIMAL128:
+    case Type::DECIMAL256:
       return true;
     default:
       break;
