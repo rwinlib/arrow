@@ -15,8 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Deprecated header, here for backwards compatibility in parquet-cpp
+// This API is EXPERIMENTAL.
 
-#pragma once
+#include "arrow/dataset/visibility.h"
 
-#include "arrow/util/macros.h"
+namespace arrow {
+namespace dataset {
+namespace internal {
+
+/// Register dataset-based exec nodes with the exec node registry
+///
+/// This function must be called before using dataset ExecNode factories
+ARROW_DS_EXPORT void Initialize();
+
+}  // namespace internal
+}  // namespace dataset
+}  // namespace arrow

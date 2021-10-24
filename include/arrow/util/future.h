@@ -28,6 +28,7 @@
 #include "arrow/result.h"
 #include "arrow/status.h"
 #include "arrow/type_fwd.h"
+#include "arrow/type_traits.h"
 #include "arrow/util/functional.h"
 #include "arrow/util/macros.h"
 #include "arrow/util/optional.h"
@@ -47,8 +48,17 @@ struct is_future : std::false_type {};
 template <typename T>
 struct is_future<Future<T>> : std::true_type {};
 
+template <typename Signature, typename Enable = void>
+struct result_of;
+
+template <typename Fn, typename... A>
+struct result_of<Fn(A...),
+                 internal::void_t<decltype(std::declval<Fn>()(std::declval<A>()...))>> {
+  using type = decltype(std::declval<Fn>()(std::declval<A>()...));
+};
+
 template <typename Signature>
-using result_of_t = typename std::result_of<Signature>::type;
+using result_of_t = typename result_of<Signature>::type;
 
 // Helper to find the synchronous counterpart for a Future
 template <typename T>
@@ -829,6 +839,17 @@ inline Future<>::Future(Status s) : Future(internal::Empty::ToResult(std::move(s
 /// the first failing future.
 ARROW_EXPORT
 Future<> AllComplete(const std::vector<Future<>>& futures);
+
+/// \brief Create a Future which completes when all of `futures` complete.
+///
+/// The future will finish with an ok status if all `futures` finish with
+/// an ok status. Otherwise, it will be marked failed with the status of
+/// one of the failing futures.
+///
+/// Unlike AllComplete this Future will not complete immediately when a
+/// failure occurs.  It will wait until all futures have finished.
+ARROW_EXPORT
+Future<> AllFinished(const std::vector<Future<>>& futures);
 
 /// \brief Wait for one of the futures to end, or for the given timeout to expire.
 ///

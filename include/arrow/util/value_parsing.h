@@ -273,6 +273,30 @@ inline bool ParseUnsigned(const char* s, size_t length, uint64_t* out) {
 #undef PARSE_UNSIGNED_ITERATION
 #undef PARSE_UNSIGNED_ITERATION_LAST
 
+template <typename T>
+bool ParseHex(const char* s, size_t length, T* out) {
+  // lets make sure that the length of the string is not too big
+  if (!ARROW_PREDICT_TRUE(sizeof(T) * 2 >= length && length > 0)) {
+    return false;
+  }
+  T result = 0;
+  for (size_t i = 0; i < length; i++) {
+    result = static_cast<T>(result << 4);
+    if (s[i] >= '0' && s[i] <= '9') {
+      result = static_cast<T>(result | (s[i] - '0'));
+    } else if (s[i] >= 'A' && s[i] <= 'F') {
+      result = static_cast<T>(result | (s[i] - 'A' + 10));
+    } else if (s[i] >= 'a' && s[i] <= 'f') {
+      result = static_cast<T>(result | (s[i] - 'a' + 10));
+    } else {
+      /* Non-digit */
+      return false;
+    }
+  }
+  *out = result;
+  return true;
+}
+
 template <class ARROW_TYPE>
 struct StringToUnsignedIntConverterMixin {
   using value_type = typename ARROW_TYPE::c_type;
@@ -280,6 +304,13 @@ struct StringToUnsignedIntConverterMixin {
   static bool Convert(const ARROW_TYPE&, const char* s, size_t length, value_type* out) {
     if (ARROW_PREDICT_FALSE(length == 0)) {
       return false;
+    }
+    // If it starts with 0x then its hex
+    if (length > 2 && s[0] == '0' && ((s[1] == 'x') || (s[1] == 'X'))) {
+      length -= 2;
+      s += 2;
+
+      return ARROW_PREDICT_TRUE(ParseHex(s, length, out));
     }
     // Skip leading zeros
     while (length > 0 && *s == '0') {
@@ -329,6 +360,18 @@ struct StringToSignedIntConverterMixin {
     if (ARROW_PREDICT_FALSE(length == 0)) {
       return false;
     }
+    // If it starts with 0x then its hex
+    if (length > 2 && s[0] == '0' && ((s[1] == 'x') || (s[1] == 'X'))) {
+      length -= 2;
+      s += 2;
+
+      if (!ARROW_PREDICT_TRUE(ParseHex(s, length, &unsigned_value))) {
+        return false;
+      }
+      *out = static_cast<value_type>(unsigned_value);
+      return true;
+    }
+
     if (*s == '-') {
       negative = true;
       s++;
@@ -524,7 +567,7 @@ static inline bool ParseSubSeconds(const char* s, size_t length, TimeUnit::type 
   if (ARROW_PREDICT_TRUE(omitted == 0)) {
     return ParseUnsigned(s, length, out);
   } else {
-    uint32_t subseconds;
+    uint32_t subseconds = 0;
     bool success = ParseUnsigned(s, length, &subseconds);
     if (ARROW_PREDICT_TRUE(success)) {
       switch (omitted) {
@@ -719,7 +762,9 @@ struct StringConverter<DATE_TYPE, enable_if_date<DATE_TYPE>> {
 
   static bool Convert(const DATE_TYPE& type, const char* s, size_t length,
                       value_type* out) {
-    if (length != 10) return false;
+    if (ARROW_PREDICT_FALSE(length != 10)) {
+      return false;
+    }
 
     duration_type since_epoch;
     if (ARROW_PREDICT_FALSE(!detail::ParseYYYY_MM_DD(s, &since_epoch))) {
@@ -735,12 +780,36 @@ template <typename TIME_TYPE>
 struct StringConverter<TIME_TYPE, enable_if_time<TIME_TYPE>> {
   using value_type = typename TIME_TYPE::c_type;
 
+  // We allow the following formats for all units:
+  // - "hh:mm"
+  // - "hh:mm:ss"
+  //
+  // We allow the following formats for unit == MILLI, MICRO, or NANO:
+  // - "hh:mm:ss.s{1,3}"
+  //
+  // We allow the following formats for unit == MICRO, or NANO:
+  // - "hh:mm:ss.s{4,6}"
+  //
+  // We allow the following formats for unit == NANO:
+  // - "hh:mm:ss.s{7,9}"
+
   static bool Convert(const TIME_TYPE& type, const char* s, size_t length,
                       value_type* out) {
-    if (length < 8) return false;
-    auto unit = type.unit();
-
+    const auto unit = type.unit();
     std::chrono::seconds since_midnight;
+
+    if (length == 5) {
+      if (ARROW_PREDICT_FALSE(!detail::ParseHH_MM(s, &since_midnight))) {
+        return false;
+      }
+      *out =
+          static_cast<value_type>(util::CastSecondsToUnit(unit, since_midnight.count()));
+      return true;
+    }
+
+    if (ARROW_PREDICT_FALSE(length < 8)) {
+      return false;
+    }
     if (ARROW_PREDICT_FALSE(!detail::ParseHH_MM_SS(s, &since_midnight))) {
       return false;
     }
@@ -749,6 +818,10 @@ struct StringConverter<TIME_TYPE, enable_if_time<TIME_TYPE>> {
 
     if (length == 8) {
       return true;
+    }
+
+    if (ARROW_PREDICT_FALSE(s[8] != '.')) {
+      return false;
     }
 
     uint32_t subseconds_count = 0;
