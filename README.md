@@ -1,4 +1,4 @@
-# Apache Arrow 6.0.0
+# Apache Arrow 6.0.1
 
 Combined bundle with builds for rtools40 [mingw-w64-arrow](https://github.com/r-windows/rtools-packages/blob/master/mingw-w64-arrow/PKGBUILD) and [backports](https://github.com/r-windows/rtools-backports/blob/master/mingw-w64-arrow/PKGBUILD) for the R legacy toolchain in [lib-4.9.3](lib-4.9.3)
 
