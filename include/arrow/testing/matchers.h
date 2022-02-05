@@ -17,8 +17,11 @@
 
 #pragma once
 
+#include <utility>
+
 #include <gmock/gmock-matchers.h>
 
+#include "arrow/datum.h"
 #include "arrow/result.h"
 #include "arrow/status.h"
 #include "arrow/testing/future_util.h"
@@ -26,6 +29,37 @@
 #include "arrow/util/future.h"
 
 namespace arrow {
+
+class PointeesEqualMatcher {
+ public:
+  template <typename PtrPair>
+  operator testing::Matcher<PtrPair>() const {  // NOLINT runtime/explicit
+    struct Impl : testing::MatcherInterface<const PtrPair&> {
+      void DescribeTo(::std::ostream* os) const override { *os << "pointees are equal"; }
+
+      void DescribeNegationTo(::std::ostream* os) const override {
+        *os << "pointees are not equal";
+      }
+
+      bool MatchAndExplain(const PtrPair& pair,
+                           testing::MatchResultListener* listener) const override {
+        const auto& first = *std::get<0>(pair);
+        const auto& second = *std::get<1>(pair);
+        const bool match = first.Equals(second);
+        *listener << "whose pointees " << testing::PrintToString(first) << " and "
+                  << testing::PrintToString(second)
+                  << (match ? " are equal" : " are not equal");
+        return match;
+      }
+    };
+
+    return testing::Matcher<PtrPair>(new Impl());
+  }
+};
+
+// A matcher that checks that the values pointed to are Equals().
+// Useful in conjunction with other googletest matchers.
+inline PointeesEqualMatcher PointeesEqual() { return {}; }
 
 template <typename ResultMatcher>
 class FutureMatcher {
@@ -192,12 +226,10 @@ class OkMatcher {
       bool MatchAndExplain(const Res& maybe_value,
                            testing::MatchResultListener* listener) const override {
         const Status& status = internal::GenericToStatus(maybe_value);
-        testing::StringMatchResultListener value_listener;
 
         const bool match = status.ok();
         *listener << "whose value " << testing::PrintToString(status.ToString())
                   << (match ? " matches" : " doesn't match");
-        testing::internal::PrintIfNotEmpty(value_listener.str(), listener->stream());
         return match;
       }
     };
@@ -232,6 +264,63 @@ inline ErrorMatcher Raises(StatusCode code) { return ErrorMatcher(code, util::nu
 template <typename MessageMatcher>
 ErrorMatcher Raises(StatusCode code, const MessageMatcher& message_matcher) {
   return ErrorMatcher(code, testing::MatcherCast<std::string>(message_matcher));
+}
+
+class DataEqMatcher {
+ public:
+  explicit DataEqMatcher(Datum expected) : expected_(std::move(expected)) {}
+
+  template <typename Data>
+  operator testing::Matcher<Data>() const {  // NOLINT runtime/explicit
+    struct Impl : testing::MatcherInterface<const Data&> {
+      explicit Impl(Datum expected) : expected_(std::move(expected)) {}
+
+      void DescribeTo(::std::ostream* os) const override {
+        *os << "has data ";
+        PrintTo(expected_, os);
+      }
+
+      void DescribeNegationTo(::std::ostream* os) const override {
+        *os << "doesn't have data ";
+        PrintTo(expected_, os);
+      }
+
+      bool MatchAndExplain(const Data& data,
+                           testing::MatchResultListener* listener) const override {
+        Datum boxed(data);
+
+        if (boxed.kind() != expected_.kind()) {
+          *listener << "whose Datum::kind " << boxed.ToString() << " doesn't match "
+                    << expected_.ToString();
+          return false;
+        }
+
+        if (*boxed.type() != *expected_.type()) {
+          *listener << "whose DataType " << boxed.type()->ToString() << " doesn't match "
+                    << expected_.type()->ToString();
+          return false;
+        }
+
+        const bool match = boxed == expected_;
+        *listener << "whose value ";
+        PrintTo(boxed, listener->stream());
+        *listener << (match ? " matches" : " doesn't match");
+        return match;
+      }
+
+      Datum expected_;
+    };
+
+    return testing::Matcher<Data>(new Impl(expected_));
+  }
+
+ private:
+  Datum expected_;
+};
+
+template <typename Data>
+DataEqMatcher DataEq(Data&& dat) {
+  return DataEqMatcher(Datum(std::forward<Data>(dat)));
 }
 
 }  // namespace arrow

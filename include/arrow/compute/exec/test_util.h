@@ -88,6 +88,9 @@ ARROW_TESTING_EXPORT
 BatchesWithSchema MakeBasicBatches();
 
 ARROW_TESTING_EXPORT
+BatchesWithSchema MakeNestedBatches();
+
+ARROW_TESTING_EXPORT
 BatchesWithSchema MakeRandomBatches(const std::shared_ptr<Schema>& schema,
                                     int num_batches = 10, int batch_size = 4);
 
@@ -102,6 +105,12 @@ ARROW_TESTING_EXPORT
 void AssertExecBatchesEqual(const std::shared_ptr<Schema>& schema,
                             const std::vector<ExecBatch>& exp,
                             const std::vector<ExecBatch>& act);
+
+ARROW_TESTING_EXPORT
+bool operator==(const Declaration&, const Declaration&);
+
+ARROW_TESTING_EXPORT
+void PrintTo(const Declaration& decl, std::ostream* os);
 
 }  // namespace compute
 }  // namespace arrow

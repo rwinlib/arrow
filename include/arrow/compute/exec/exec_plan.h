@@ -223,7 +223,7 @@ class ARROW_EXPORT ExecNode {
   /// \brief A future which will be marked finished when this node has stopped producing.
   virtual Future<> finished() = 0;
 
-  std::string ToString() const;
+  std::string ToString(int indent = 0) const;
 
  protected:
   ExecNode(ExecPlan* plan, NodeVector inputs, std::vector<std::string> input_labels,
@@ -234,7 +234,7 @@ class ARROW_EXPORT ExecNode {
   bool ErrorIfNotOk(Status status);
 
   /// Provide extra info to include in the string representation.
-  virtual std::string ToStringExtra() const;
+  virtual std::string ToStringExtra(int indent) const;
 
   ExecPlan* plan_;
   std::string label_;
@@ -345,18 +345,25 @@ struct ARROW_EXPORT Declaration {
         label{std::move(label)} {}
 
   template <typename Options>
+  Declaration(std::string factory_name, std::vector<Input> inputs, Options options,
+              std::string label)
+      : Declaration{std::move(factory_name), std::move(inputs),
+                    std::shared_ptr<ExecNodeOptions>(
+                        std::make_shared<Options>(std::move(options))),
+                    std::move(label)} {}
+
+  template <typename Options>
   Declaration(std::string factory_name, std::vector<Input> inputs, Options options)
-      : factory_name{std::move(factory_name)},
-        inputs{std::move(inputs)},
-        options{std::make_shared<Options>(std::move(options))},
-        label{this->factory_name} {}
+      : Declaration{std::move(factory_name), std::move(inputs), std::move(options),
+                    /*label=*/""} {}
 
   template <typename Options>
   Declaration(std::string factory_name, Options options)
-      : factory_name{std::move(factory_name)},
-        inputs{},
-        options{std::make_shared<Options>(std::move(options))},
-        label{this->factory_name} {}
+      : Declaration{std::move(factory_name), {}, std::move(options), /*label=*/""} {}
+
+  template <typename Options>
+  Declaration(std::string factory_name, Options options, std::string label)
+      : Declaration{std::move(factory_name), {}, std::move(options), std::move(label)} {}
 
   /// \brief Convenience factory for the common case of a simple sequence of nodes.
   ///
