@@ -106,7 +106,8 @@ enum class CalendarUnit : int8_t {
 
 class ARROW_EXPORT RoundTemporalOptions : public FunctionOptions {
  public:
-  explicit RoundTemporalOptions(int multiple = 1, CalendarUnit unit = CalendarUnit::DAY);
+  explicit RoundTemporalOptions(int multiple = 1, CalendarUnit unit = CalendarUnit::DAY,
+                                bool week_starts_monday = true);
   static constexpr char const kTypeName[] = "RoundTemporalOptions";
   static RoundTemporalOptions Defaults() { return RoundTemporalOptions(); }
 
@@ -114,6 +115,8 @@ class ARROW_EXPORT RoundTemporalOptions : public FunctionOptions {
   int multiple;
   /// The unit used for rounding of time
   CalendarUnit unit;
+  /// What day does the week start with (Monday=true, Sunday=false)
+  bool week_starts_monday;
 };
 
 class ARROW_EXPORT RoundToMultipleOptions : public FunctionOptions {
@@ -126,10 +129,9 @@ class ARROW_EXPORT RoundToMultipleOptions : public FunctionOptions {
   static RoundToMultipleOptions Defaults() { return RoundToMultipleOptions(); }
   /// Rounding scale (multiple to round to).
   ///
-  /// Should be a scalar of a type compatible with the argument to be rounded.
-  /// For example, rounding a decimal value means a decimal multiple is
-  /// required. Rounding a floating point or integer value means a floating
-  /// point scalar is required.
+  /// Should be a positive numeric scalar of a type compatible with the
+  /// argument to be rounded. The cast kernel is used to convert the rounding
+  /// multiple to match the result type.
   std::shared_ptr<Scalar> multiple;
   /// Rounding and tie-breaking mode
   RoundMode round_mode;
@@ -264,12 +266,17 @@ class ARROW_EXPORT StructFieldOptions : public FunctionOptions {
 
 class ARROW_EXPORT StrptimeOptions : public FunctionOptions {
  public:
-  explicit StrptimeOptions(std::string format, TimeUnit::type unit);
+  explicit StrptimeOptions(std::string format, TimeUnit::type unit,
+                           bool error_is_null = false);
   StrptimeOptions();
   static constexpr char const kTypeName[] = "StrptimeOptions";
 
+  /// The desired format string.
   std::string format;
+  /// The desired time resolution
   TimeUnit::type unit;
+  /// Return null on parsing errors if true or raise if false
+  bool error_is_null;
 };
 
 class ARROW_EXPORT StrftimeOptions : public FunctionOptions {
@@ -468,6 +475,30 @@ class ARROW_EXPORT RandomOptions : public FunctionOptions {
   Initializer initializer;
   /// The seed value used to initialize the random number generation.
   uint64_t seed;
+};
+
+/// Options for map_lookup function
+class ARROW_EXPORT MapLookupOptions : public FunctionOptions {
+ public:
+  enum Occurrence {
+    /// Return the first matching value
+    FIRST,
+    /// Return the last matching value
+    LAST,
+    /// Return all matching values
+    ALL
+  };
+
+  explicit MapLookupOptions(std::shared_ptr<Scalar> query_key, Occurrence occurrence);
+  MapLookupOptions();
+
+  constexpr static char const kTypeName[] = "MapLookupOptions";
+
+  /// The key to lookup in the map
+  std::shared_ptr<Scalar> query_key;
+
+  /// Whether to return the first, last, or all matching values
+  Occurrence occurrence;
 };
 
 /// @}
@@ -713,6 +744,18 @@ Result<Datum> Log1p(const Datum& arg, ArithmeticOptions options = ArithmeticOpti
 ARROW_EXPORT
 Result<Datum> Logb(const Datum& arg, const Datum& base,
                    ArithmeticOptions options = ArithmeticOptions(),
+                   ExecContext* ctx = NULLPTR);
+
+/// \brief Get the square-root of a value.
+///
+/// If argument is null the result will be null.
+///
+/// \param[in] arg The values to compute the square-root for.
+/// \param[in] options arithmetic options (overflow handling), optional
+/// \param[in] ctx the function execution context, optional
+/// \return the elementwise square-root
+ARROW_EXPORT
+Result<Datum> Sqrt(const Datum& arg, ArithmeticOptions options = ArithmeticOptions(),
                    ExecContext* ctx = NULLPTR);
 
 /// \brief Round to the nearest integer less than or equal in magnitude to the
@@ -1099,6 +1142,17 @@ Result<Datum> CaseWhen(const Datum& cond, const std::vector<Datum>& cases,
 ARROW_EXPORT
 Result<Datum> Year(const Datum& values, ExecContext* ctx = NULLPTR);
 
+/// \brief IsLeapYear returns if a year is a leap year for each element of `values`
+///
+/// \param[in] values input to extract leap year indicator from
+/// \param[in] ctx the function execution context, optional
+/// \return the resulting datum
+///
+/// \since 8.0.0
+/// \note API not yet finalized
+ARROW_EXPORT
+Result<Datum> IsLeapYear(const Datum& values, ExecContext* ctx = NULLPTR);
+
 /// \brief Month returns month for each element of `values`.
 /// Month is encoded as January=1, December=12
 ///
@@ -1174,6 +1228,20 @@ ARROW_EXPORT Result<Datum> DayOfYear(const Datum& values, ExecContext* ctx = NUL
 /// \note API not yet finalized
 ARROW_EXPORT
 Result<Datum> ISOYear(const Datum& values, ExecContext* ctx = NULLPTR);
+
+/// \brief USYear returns US epidemiological year number for each element of `values`.
+/// First week of US epidemiological year has the majority (4 or more) of it's
+/// days in January. Last week of US epidemiological year has the year's last
+/// Wednesday in it. US epidemiological week starts on Sunday.
+///
+/// \param[in] values input to extract US epidemiological year from
+/// \param[in] ctx the function execution context, optional
+/// \return the resulting datum
+///
+/// \since 8.0.0
+/// \note API not yet finalized
+ARROW_EXPORT
+Result<Datum> USYear(const Datum& values, ExecContext* ctx = NULLPTR);
 
 /// \brief ISOWeek returns ISO week of year number for each element of `values`.
 /// First ISO week has the majority (4 or more) of its days in January.
@@ -1334,6 +1402,22 @@ ARROW_EXPORT Result<Datum> Subsecond(const Datum& values, ExecContext* ctx = NUL
 ARROW_EXPORT Result<Datum> Strftime(const Datum& values, StrftimeOptions options,
                                     ExecContext* ctx = NULLPTR);
 
+/// \brief Parse timestamps according to a format string
+///
+/// Return parsed timestamps according to the format string
+/// `StrptimeOptions::format` at time resolution `Strftime::unit`. Parse errors are
+/// raised depending on the `Strftime::error_is_null` setting.
+///
+/// \param[in] values input strings
+/// \param[in] options for setting format string, unit and error_is_null
+/// \param[in] ctx the function execution context, optional
+/// \return the resulting datum
+///
+/// \since 8.0.0
+/// \note API not yet finalized
+ARROW_EXPORT Result<Datum> Strptime(const Datum& values, StrptimeOptions options,
+                                    ExecContext* ctx = NULLPTR);
+
 /// \brief Converts timestamps from local timestamp without a timezone to a timestamp with
 /// timezone, interpreting the local timestamp as being in the specified timezone for each
 /// element of `values`
@@ -1350,5 +1434,32 @@ ARROW_EXPORT Result<Datum> AssumeTimezone(const Datum& values,
                                           AssumeTimezoneOptions options,
                                           ExecContext* ctx = NULLPTR);
 
+/// \brief IsDaylightSavings extracts if currently observing daylight savings for each
+/// element of `values`
+///
+/// \param[in] values input to extract daylight savings indicator from
+/// \param[in] ctx the function execution context, optional
+/// \return the resulting datum
+///
+/// \since 8.0.0
+/// \note API not yet finalized
+ARROW_EXPORT Result<Datum> IsDaylightSavings(const Datum& values,
+                                             ExecContext* ctx = NULLPTR);
+
+/// \brief Finds either the FIRST, LAST, or ALL items with a key that matches the given
+/// query key in a map.
+///
+/// Returns an array of items for FIRST and LAST, and an array of list of items for ALL.
+///
+/// \param[in] map to look in
+/// \param[in] options to pass a query key and choose which matching keys to return
+/// (FIRST, LAST or ALL)
+/// \param[in] ctx the function execution context, optional
+/// \return the resulting datum
+///
+/// \since 8.0.0
+/// \note API not yet finalized
+ARROW_EXPORT Result<Datum> MapLookup(const Datum& map, MapLookupOptions options,
+                                     ExecContext* ctx = NULLPTR);
 }  // namespace compute
 }  // namespace arrow

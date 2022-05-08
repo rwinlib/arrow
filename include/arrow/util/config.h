@@ -15,15 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#define ARROW_VERSION_MAJOR 7
+#define ARROW_VERSION_MAJOR 8
 #define ARROW_VERSION_MINOR 0
 #define ARROW_VERSION_PATCH 0
 #define ARROW_VERSION ((ARROW_VERSION_MAJOR * 1000) + ARROW_VERSION_MINOR) * 1000 + ARROW_VERSION_PATCH
 
-#define ARROW_VERSION_STRING "7.0.0"
+#define ARROW_VERSION_STRING "8.0.0"
 
-#define ARROW_SO_VERSION "700"
-#define ARROW_FULL_SO_VERSION "700.0.0"
+#define ARROW_SO_VERSION "800"
+#define ARROW_FULL_SO_VERSION "800.0.0"
 
 #define ARROW_CXX_COMPILER_ID "GNU"
 #define ARROW_CXX_COMPILER_VERSION "8.3.0"
@@ -31,13 +31,14 @@
 
 #define ARROW_BUILD_TYPE "RELEASE"
 
-#define ARROW_GIT_ID "2d5ba73be0859551fdfcb2eb18fa24d688245924"
-#define ARROW_GIT_DESCRIPTION "v8-9.0.257.17-40-g2d5ba73"
+#define ARROW_GIT_ID "90ba822cf5ba9a3d8294bc426bbdddb430902af4"
+#define ARROW_GIT_DESCRIPTION "v8-9.0.257.17-54-g90ba822"
 
 #define ARROW_PACKAGE_KIND ""
 
 #define ARROW_COMPUTE
 #define ARROW_CSV
+/* #undef ARROW_CUDA */
 #define ARROW_DATASET
 #define ARROW_FILESYSTEM
 /* #undef ARROW_FLIGHT */
@@ -47,5 +48,6 @@
 #define ARROW_S3
 #define ARROW_USE_NATIVE_INT128
 /* #undef ARROW_WITH_OPENTELEMETRY */
+/* #undef ARROW_WITH_UCX */
 
 /* #undef GRPCPP_PP_INCLUDE */

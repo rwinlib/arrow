@@ -82,8 +82,8 @@ class ARROW_EXPORT Fingerprintable {
   virtual std::string ComputeFingerprint() const = 0;
   virtual std::string ComputeMetadataFingerprint() const = 0;
 
-  mutable std::atomic<std::string*> fingerprint_;
-  mutable std::atomic<std::string*> metadata_fingerprint_;
+  mutable std::atomic<std::string*> fingerprint_{NULLPTR};
+  mutable std::atomic<std::string*> metadata_fingerprint_{NULLPTR};
 };
 
 }  // namespace detail
@@ -149,6 +149,7 @@ class ARROW_EXPORT DataType : public detail::Fingerprintable {
   /// \brief Return the number of children fields associated with this type.
   int num_fields() const { return static_cast<int>(children_.size()); }
 
+  /// \brief Apply the TypeVisitor::Visit() method specialized to the data type
   Status Accept(TypeVisitor* visitor) const;
 
   /// \brief A string representation of the type, including any children
@@ -364,6 +365,8 @@ class ARROW_EXPORT Field : public detail::Fingerprintable {
  private:
   std::string ComputeFingerprint() const override;
   std::string ComputeMetadataFingerprint() const override;
+
+  ARROW_EXPORT friend void PrintTo(const Field& field, std::ostream* os);
 
   // Field name
   std::string name_;
@@ -817,7 +820,7 @@ class ARROW_EXPORT Decimal256Type : public DecimalType {
 class ARROW_EXPORT BaseListType : public NestedType {
  public:
   using NestedType::NestedType;
-  std::shared_ptr<Field> value_field() const { return children_[0]; }
+  const std::shared_ptr<Field>& value_field() const { return children_[0]; }
 
   std::shared_ptr<DataType> value_type() const { return children_[0]->type(); }
 };
@@ -1612,6 +1615,11 @@ class ARROW_EXPORT FieldRef {
   /// Equivalent to a single index string of indices.
   FieldRef(int index) : impl_(FieldPath({index})) {}  // NOLINT runtime/explicit
 
+  /// Construct a nested FieldRef.
+  FieldRef(std::vector<FieldRef> refs) {  // NOLINT runtime/explicit
+    Flatten(std::move(refs));
+  }
+
   /// Convenience constructor for nested FieldRefs: each argument will be used to
   /// construct a FieldRef
   template <typename A0, typename A1, typename... A>
@@ -1644,7 +1652,7 @@ class ARROW_EXPORT FieldRef {
 
   bool Equals(const FieldRef& other) const { return impl_ == other.impl_; }
   bool operator==(const FieldRef& other) const { return Equals(other); }
-  bool operator!=(const FieldRef& other) const { return !(*this == other); }
+  bool operator!=(const FieldRef& other) const { return !Equals(other); }
 
   std::string ToString() const;
 
