@@ -81,6 +81,14 @@ using compute::project;
 
 using fs::internal::GetAbstractPathExtension;
 
+/// \brief Assert a dataset produces data with the schema
+void AssertDatasetHasSchema(std::shared_ptr<Dataset> ds, std::shared_ptr<Schema> schema) {
+  ASSERT_OK_AND_ASSIGN(auto scanner_builder, ds->NewScan());
+  ASSERT_OK_AND_ASSIGN(auto scanner, scanner_builder->Finish());
+  ASSERT_OK_AND_ASSIGN(auto table, scanner->ToTable());
+  ASSERT_EQ(*table->schema(), *schema);
+}
+
 class FileSourceFixtureMixin : public ::testing::Test {
  public:
   std::unique_ptr<FileSource> GetSource(std::shared_ptr<Buffer> buffer) {
@@ -546,6 +554,20 @@ class FileFormatFixtureMixin : public ::testing::Test {
     predicate = equal(call("add", {field_ref("f64"), literal(3)}), literal(2));
     ASSERT_OK_AND_ASSIGN(predicate, predicate.Bind(*full_schema));
     ASSERT_FINISHES_OK_AND_EQ(util::nullopt, fragment->CountRows(predicate, options));
+  }
+  void TestFragmentEquals() {
+    auto options = std::make_shared<ScanOptions>();
+    auto this_schema = schema({field("f64", float64())});
+    auto other_schema = schema({field("f32", float32())});
+    auto reader = this->GetRecordBatchReader(this_schema);
+    auto other_reader = this->GetRecordBatchReader(other_schema);
+    auto source = this->GetFileSource(reader.get());
+    auto other_source = this->GetFileSource(other_reader.get());
+
+    auto fragment = this->MakeFragment(*source);
+    EXPECT_TRUE(fragment->Equals(*fragment));
+    auto other = this->MakeFragment(*other_source);
+    EXPECT_FALSE(fragment->Equals(*other));
   }
 
  protected:

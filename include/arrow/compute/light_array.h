@@ -21,7 +21,9 @@
 
 #include "arrow/array.h"
 #include "arrow/compute/exec.h"
+#include "arrow/compute/exec/util.h"
 #include "arrow/type.h"
+#include "arrow/util/cpu_info.h"
 #include "arrow/util/logging.h"
 
 /// This file contains lightweight containers for Arrow buffers.  These containers
@@ -30,6 +32,18 @@
 
 namespace arrow {
 namespace compute {
+
+/// \brief Context needed by various execution engine operations
+///
+/// In the execution engine this context is provided by either the node or the
+/// plan and the context exists for the lifetime of the plan.  Defining this here
+/// allows us to take advantage of these resources without coupling the logic with
+/// the execution engine.
+struct LightContext {
+  bool has_avx2() const { return (hardware_flags & arrow::internal::CpuInfo::AVX2) > 0; }
+  int64_t hardware_flags;
+  util::TempVectorStack* stack;
+};
 
 /// \brief Description of the layout of a "key" column
 ///
@@ -171,7 +185,7 @@ ARROW_EXPORT Result<KeyColumnMetadata> ColumnMetadataFromDataType(
 /// The caller should ensure this is only called on "key" columns.
 /// \see ColumnMetadataFromDataType for details
 ARROW_EXPORT Result<KeyColumnArray> ColumnArrayFromArrayData(
-    const std::shared_ptr<ArrayData>& array_data, int start_row, int num_rows);
+    const std::shared_ptr<ArrayData>& array_data, int64_t start_row, int64_t num_rows);
 
 /// \brief Create KeyColumnMetadata instances from an ExecBatch
 ///
@@ -188,8 +202,8 @@ ARROW_EXPORT Status ColumnMetadatasFromExecBatch(
 ///
 /// All columns in `batch` must be eligible "key" columns and have an array shape
 /// \see ColumnArrayFromArrayData for more details
-ARROW_EXPORT Status ColumnArraysFromExecBatch(const ExecBatch& batch, int start_row,
-                                              int num_rows,
+ARROW_EXPORT Status ColumnArraysFromExecBatch(const ExecBatch& batch, int64_t start_row,
+                                              int64_t num_rows,
                                               std::vector<KeyColumnArray>* column_arrays);
 
 /// \brief Create KeyColumnArray instances from an ExecBatch
