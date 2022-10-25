@@ -22,7 +22,7 @@ jobs:
       - name: Push binaries
         run: |
           version=${{ steps.download.outputs.VERSION }}
-          git add README.md include lib*
+          git add README.md include lib
           git commit -m "Bundle $version ($(date +%F))" || exit 0
           git tag $version
           git push origin master $version
