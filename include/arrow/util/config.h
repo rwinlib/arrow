@@ -15,24 +15,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#define ARROW_VERSION_MAJOR 9
+#define ARROW_VERSION_MAJOR 10
 #define ARROW_VERSION_MINOR 0
 #define ARROW_VERSION_PATCH 0
 #define ARROW_VERSION ((ARROW_VERSION_MAJOR * 1000) + ARROW_VERSION_MINOR) * 1000 + ARROW_VERSION_PATCH
 
-#define ARROW_VERSION_STRING "9.0.0"
+#define ARROW_VERSION_STRING "10.0.0"
 
-#define ARROW_SO_VERSION "900"
-#define ARROW_FULL_SO_VERSION "900.0.0"
+#define ARROW_SO_VERSION "1000"
+#define ARROW_FULL_SO_VERSION "1000.0.0"
 
 #define ARROW_CXX_COMPILER_ID "GNU"
 #define ARROW_CXX_COMPILER_VERSION "8.3.0"
-#define ARROW_CXX_COMPILER_FLAGS " -fdiagnostics-color=always -O3 -DNDEBUG"
+#define ARROW_CXX_COMPILER_FLAGS " -fdiagnostics-color=always -O2 -DNDEBUG -ftree-vectorize"
 
 #define ARROW_BUILD_TYPE "RELEASE"
 
-#define ARROW_GIT_ID "8af70a54a0a293115b3829345dd775e80bcb79c9"
-#define ARROW_GIT_DESCRIPTION "v8-9.0.257.17-59-g8af70a5"
+#define ARROW_GIT_ID "aa7118b6e5f49b354fa8a93d9cf363c9ebe9a3f0"
+#define ARROW_GIT_DESCRIPTION "v8-9.0.257.17-65-gaa7118b"
 
 #define ARROW_PACKAGE_KIND ""
 
@@ -42,14 +42,19 @@
 #define ARROW_DATASET
 #define ARROW_FILESYSTEM
 /* #undef ARROW_FLIGHT */
+/* #undef ARROW_FLIGHT_SQL */
 #define ARROW_IPC
 /* #undef ARROW_JEMALLOC */
 /* #undef ARROW_JEMALLOC_VENDORED */
 #define ARROW_JSON
+/* #undef ARROW_ORC */
+#define ARROW_PARQUET
+/* #undef ARROW_SUBSTRAIT */
 
 #define ARROW_GCS
 #define ARROW_S3
 #define ARROW_USE_NATIVE_INT128
+/* #undef ARROW_WITH_MUSL */
 /* #undef ARROW_WITH_OPENTELEMETRY */
 /* #undef ARROW_WITH_UCX */
 
