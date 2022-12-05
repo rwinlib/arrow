@@ -1,6 +1,6 @@
-# arrow 10.0.0-1
+# arrow 10.0.1-1
 
- - mingw-w64-i686-arrow-10.0.0-1-any.pkg.tar.xz
+ - mingw-w64-i686-arrow-10.0.1-1-any.pkg.tar.xz
  - mingw-w64-i686-aws-sdk-cpp-1.7.365-1-any.pkg.tar.xz
  - mingw-w64-i686-brotli-1.0.9-4-any.pkg.tar.xz
  - mingw-w64-i686-openssl-1.1.1.m-9800-any.pkg.tar.xz
@@ -13,7 +13,7 @@
  - mingw-w64-i686-thrift-0.13.0-1-any.pkg.tar.xz
  - mingw-w64-i686-zstd-1.4.4-1-any.pkg.tar.xz
  - mingw-w64-i686-libutf8proc-2.4.0-2-any.pkg.tar.xz
- - mingw-w64-x86_64-arrow-10.0.0-1-any.pkg.tar.xz
+ - mingw-w64-x86_64-arrow-10.0.1-1-any.pkg.tar.xz
  - mingw-w64-x86_64-aws-sdk-cpp-1.7.365-1-any.pkg.tar.xz
  - mingw-w64-x86_64-brotli-1.0.9-4-any.pkg.tar.xz
  - mingw-w64-x86_64-openssl-1.1.1.m-9800-any.pkg.tar.xz
@@ -26,7 +26,7 @@
  - mingw-w64-x86_64-thrift-0.13.0-1-any.pkg.tar.xz
  - mingw-w64-x86_64-zstd-1.4.4-1-any.pkg.tar.xz
  - mingw-w64-x86_64-libutf8proc-2.4.0-2-any.pkg.tar.xz
- - mingw-w64-ucrt-x86_64-arrow-10.0.0-1-any.pkg.tar.xz
+ - mingw-w64-ucrt-x86_64-arrow-10.0.1-1-any.pkg.tar.xz
  - mingw-w64-ucrt-x86_64-aws-sdk-cpp-1.7.365-1-any.pkg.tar.xz
  - mingw-w64-ucrt-x86_64-brotli-1.0.9-4-any.pkg.tar.xz
  - mingw-w64-ucrt-x86_64-openssl-1.1.1.m-9800-any.pkg.tar.xz
