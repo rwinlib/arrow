@@ -27,12 +27,20 @@
 #include "arrow/compute/api_vector.h"
 #include "arrow/compute/exec.h"
 #include "arrow/compute/exec/expression.h"
+#include "arrow/record_batch.h"
 #include "arrow/result.h"
 #include "arrow/util/async_generator.h"
 #include "arrow/util/async_util.h"
 #include "arrow/util/visibility.h"
 
 namespace arrow {
+
+namespace internal {
+
+class Executor;
+
+}  // namespace internal
+
 namespace compute {
 
 using AsyncExecBatchGenerator = AsyncGenerator<std::optional<ExecBatch>>;
@@ -57,6 +65,10 @@ class ARROW_EXPORT SourceNodeOptions : public ExecNodeOptions {
   static Result<std::shared_ptr<SourceNodeOptions>> FromTable(const Table& table,
                                                               arrow::internal::Executor*);
 
+  static Result<std::shared_ptr<SourceNodeOptions>> FromRecordBatchReader(
+      std::shared_ptr<RecordBatchReader> reader, std::shared_ptr<Schema> schema,
+      arrow::internal::Executor*);
+
   std::shared_ptr<Schema> output_schema;
   std::function<Future<std::optional<ExecBatch>>()> generator;
 };
@@ -75,6 +87,79 @@ class ARROW_EXPORT TableSourceNodeOptions : public ExecNodeOptions {
   // If the table is larger the node will emit multiple batches from the
   // the table to be processed in parallel.
   int64_t max_batch_size;
+};
+
+/// \brief Define a lazy resolved Arrow table.
+///
+/// The table uniquely identified by the names can typically be resolved at the time when
+/// the plan is to be consumed.
+///
+/// This node is for serialization purposes only and can never be executed.
+class ARROW_EXPORT NamedTableNodeOptions : public ExecNodeOptions {
+ public:
+  NamedTableNodeOptions(std::vector<std::string> names, std::shared_ptr<Schema> schema)
+      : names(std::move(names)), schema(schema) {}
+
+  std::vector<std::string> names;
+  std::shared_ptr<Schema> schema;
+};
+
+/// \brief An extended Source node which accepts a schema
+///
+/// ItMaker is a maker of an iterator of tabular data.
+template <typename ItMaker>
+class ARROW_EXPORT SchemaSourceNodeOptions : public ExecNodeOptions {
+ public:
+  SchemaSourceNodeOptions(std::shared_ptr<Schema> schema, ItMaker it_maker,
+                          arrow::internal::Executor* io_executor = NULLPTR)
+      : schema(schema), it_maker(std::move(it_maker)), io_executor(io_executor) {}
+
+  /// \brief The schema of the record batches from the iterator
+  std::shared_ptr<Schema> schema;
+
+  /// \brief A maker of an iterator which acts as the data source
+  ItMaker it_maker;
+
+  /// \brief The executor to use for scanning the iterator
+  ///
+  /// Defaults to the default I/O executor.
+  arrow::internal::Executor* io_executor;
+};
+
+class ARROW_EXPORT RecordBatchReaderSourceNodeOptions : public ExecNodeOptions {
+ public:
+  RecordBatchReaderSourceNodeOptions(std::shared_ptr<RecordBatchReader> reader,
+                                     arrow::internal::Executor* io_executor = NULLPTR)
+      : reader(std::move(reader)), io_executor(io_executor) {}
+
+  /// \brief The RecordBatchReader which acts as the data source
+  std::shared_ptr<RecordBatchReader> reader;
+
+  /// \brief The executor to use for the reader
+  ///
+  /// Defaults to the default I/O executor.
+  arrow::internal::Executor* io_executor;
+};
+
+using ArrayVectorIteratorMaker = std::function<Iterator<std::shared_ptr<ArrayVector>>()>;
+/// \brief An extended Source node which accepts a schema and array-vectors
+class ARROW_EXPORT ArrayVectorSourceNodeOptions
+    : public SchemaSourceNodeOptions<ArrayVectorIteratorMaker> {
+  using SchemaSourceNodeOptions::SchemaSourceNodeOptions;
+};
+
+using ExecBatchIteratorMaker = std::function<Iterator<std::shared_ptr<ExecBatch>>()>;
+/// \brief An extended Source node which accepts a schema and exec-batches
+class ARROW_EXPORT ExecBatchSourceNodeOptions
+    : public SchemaSourceNodeOptions<ExecBatchIteratorMaker> {
+  using SchemaSourceNodeOptions::SchemaSourceNodeOptions;
+};
+
+using RecordBatchIteratorMaker = std::function<Iterator<std::shared_ptr<RecordBatch>>()>;
+/// \brief An extended Source node which accepts a schema and record-batches
+class ARROW_EXPORT RecordBatchSourceNodeOptions
+    : public SchemaSourceNodeOptions<RecordBatchIteratorMaker> {
+  using SchemaSourceNodeOptions::SchemaSourceNodeOptions;
 };
 
 /// \brief Make a node which excludes some rows from batches passed through it
@@ -129,8 +214,8 @@ constexpr int32_t kDefaultBackpressureLowBytes = 1 << 28;   // 256MiB
 class ARROW_EXPORT BackpressureMonitor {
  public:
   virtual ~BackpressureMonitor() = default;
-  virtual uint64_t bytes_in_use() const = 0;
-  virtual bool is_paused() const = 0;
+  virtual uint64_t bytes_in_use() = 0;
+  virtual bool is_paused() = 0;
 };
 
 /// \brief Options to control backpressure behavior
@@ -143,7 +228,7 @@ struct ARROW_EXPORT BackpressureOptions {
   ///                        queue has fewer than resume_if_below items.
   /// \param pause_if_above The producer should pause producing if the backpressure
   ///                       queue has more than pause_if_above items
-  BackpressureOptions(uint32_t resume_if_below, uint32_t pause_if_above)
+  BackpressureOptions(uint64_t resume_if_below, uint64_t pause_if_above)
       : resume_if_below(resume_if_below), pause_if_above(pause_if_above) {}
 
   static BackpressureOptions DefaultBackpressure() {
@@ -163,9 +248,19 @@ struct ARROW_EXPORT BackpressureOptions {
 class ARROW_EXPORT SinkNodeOptions : public ExecNodeOptions {
  public:
   explicit SinkNodeOptions(std::function<Future<std::optional<ExecBatch>>()>* generator,
+                           std::shared_ptr<Schema>* schema,
                            BackpressureOptions backpressure = {},
                            BackpressureMonitor** backpressure_monitor = NULLPTR)
       : generator(generator),
+        schema(schema),
+        backpressure(backpressure),
+        backpressure_monitor(backpressure_monitor) {}
+
+  explicit SinkNodeOptions(std::function<Future<std::optional<ExecBatch>>()>* generator,
+                           BackpressureOptions backpressure = {},
+                           BackpressureMonitor** backpressure_monitor = NULLPTR)
+      : generator(generator),
+        schema(NULLPTR),
         backpressure(std::move(backpressure)),
         backpressure_monitor(backpressure_monitor) {}
 
@@ -175,6 +270,11 @@ class ARROW_EXPORT SinkNodeOptions : public ExecNodeOptions {
   /// data from the plan.  If this function is not called frequently enough then the sink
   /// node will start to accumulate data and may apply backpressure.
   std::function<Future<std::optional<ExecBatch>>()>* generator;
+  /// \brief A pointer which will be set to the schema of the generated batches
+  ///
+  /// This is optional, if nullptr is passed in then it will be ignored.
+  /// This will be set when the node is added to the plan, before StartProducing is called
+  std::shared_ptr<Schema>* schema;
   /// \brief Options to control when to apply backpressure
   ///
   /// This is optional, the default is to never apply backpressure.  If the plan is not
@@ -213,8 +313,9 @@ class ARROW_EXPORT SinkNodeConsumer {
   /// This will be run once the schema is finalized as the plan is starting and
   /// before any calls to Consume.  A common use is to save off the schema so that
   /// batches can be interpreted.
+  /// TODO(ARROW-17837) Move ExecPlan* plan to query context
   virtual Status Init(const std::shared_ptr<Schema>& schema,
-                      BackpressureControl* backpressure_control) = 0;
+                      BackpressureControl* backpressure_control, ExecPlan* plan) = 0;
   /// \brief Consume a batch of data
   virtual Status Consume(ExecBatch batch) = 0;
   /// \brief Signal to the consumer that the last batch has been delivered
@@ -393,22 +494,35 @@ class ARROW_EXPORT HashJoinNodeOptions : public ExecNodeOptions {
 /// This node will output one row for each row in the left table.
 class ARROW_EXPORT AsofJoinNodeOptions : public ExecNodeOptions {
  public:
-  AsofJoinNodeOptions(FieldRef on_key, std::vector<FieldRef> by_key, int64_t tolerance)
-      : on_key(std::move(on_key)), by_key(by_key), tolerance(tolerance) {}
+  /// \brief Keys for one input table of the AsofJoin operation
+  ///
+  /// The keys must be consistent across the input tables:
+  /// Each "on" key must refer to a field of the same type and units across the tables.
+  /// Each "by" key must refer to a list of fields of the same types across the tables.
+  struct Keys {
+    /// \brief "on" key for the join.
+    ///
+    /// The input table must be sorted by the "on" key. Must be a single field of a common
+    /// type. Inexact match is used on the "on" key. i.e., a row is considered a match iff
+    /// left_on - tolerance <= right_on <= left_on.
+    /// Currently, the "on" key must be of an integer, date, or timestamp type.
+    FieldRef on_key;
+    /// \brief "by" key for the join.
+    ///
+    /// Each input table must have each field of the "by" key.  Exact equality is used for
+    /// each field of the "by" key.
+    /// Currently, each field of the "by" key must be of an integer, date, timestamp, or
+    /// base-binary type.
+    std::vector<FieldRef> by_key;
+  };
 
-  /// \brief "on" key for the join.
+  AsofJoinNodeOptions(std::vector<Keys> input_keys, int64_t tolerance)
+      : input_keys(std::move(input_keys)), tolerance(tolerance) {}
+
+  /// \brief AsofJoin keys per input table.
   ///
-  /// All inputs tables must be sorted by the "on" key. Must be a single field of a common
-  /// type. Inexact match is used on the "on" key. i.e., a row is considered match iff
-  /// left_on - tolerance <= right_on <= left_on.
-  /// Currently, the "on" key must be of an integer, date, or timestamp type.
-  FieldRef on_key;
-  /// \brief "by" key for the join.
-  ///
-  /// All input tables must have the "by" key.  Exact equality
-  /// is used for the "by" key.
-  /// Currently, the "by" key must be of an integer, date, timestamp, or base-binary type
-  std::vector<FieldRef> by_key;
+  /// \see `Keys` for details.
+  std::vector<Keys> input_keys;
   /// \brief Tolerance for inexact "on" key matching.  Must be non-negative.
   ///
   /// The tolerance is interpreted in the same units as the "on" key.
