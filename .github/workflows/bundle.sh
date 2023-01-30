@@ -7,7 +7,7 @@ pacman -Syy --noconfirm
 OUTPUT=$(mktemp -d)
 
 # Download files (-dd skips dependencies)
-pkgs=$(echo mingw-w64-{i686,x86_64,ucrt-x86_64}-{arrow,aws-sdk-cpp,brotli,openssl,lz4,re2,snappy,bzip2,curl,libssh2,thrift,zstd,libutf8proc})
+pkgs=$(echo mingw-w64-{i686,x86_64,ucrt-x86_64}-{arrow,aws-sdk-cpp,brotli,openssl,lz4,re2,snappy,bzip2,curl,libssh2,thrift,zstd,libutf8proc,nghttp2})
 URLS=$(pacman -Spdd $pkgs --cache=$OUTPUT)
 VERSION=$(pacman -Si mingw-w64-x86_64-${PACKAGE} | awk '/^Version/{print $3}')
 
