@@ -19,10 +19,9 @@
 
 #pragma once
 
-#include <string.h>
-
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 
 #include "arrow/util/bit_util.h"
 #include "arrow/util/bpacking.h"
@@ -65,7 +64,7 @@ class BitWriter {
   /// Writes v to the next aligned byte using num_bytes. If T is larger than
   /// num_bytes, the extra high-order bytes will be ignored. Returns false if
   /// there was not enough space.
-  /// Assume the v is stored in buffer_ as a litte-endian format
+  /// Assume the v is stored in buffer_ as a little-endian format
   template <typename T>
   bool PutAligned(T v, int num_bytes);
 
@@ -153,7 +152,7 @@ class BitReader {
   /// 'num_bytes'. The value is assumed to be byte-aligned so the stream will
   /// be advanced to the start of the next byte before 'v' is read. Returns
   /// false if there are not enough bytes left.
-  /// Assume the v was stored in buffer_ as a litte-endian format
+  /// Assume the v was stored in buffer_ as a little-endian format
   template <typename T>
   bool GetAligned(int num_bytes, T* v);
 
@@ -318,7 +317,7 @@ inline bool BitReader::GetValue(int num_bits, T* v) {
 template <typename T>
 inline int BitReader::GetBatch(int num_bits, T* v, int batch_size) {
   DCHECK(buffer_ != NULL);
-  DCHECK_LE(num_bits, static_cast<int>(sizeof(T) * 8));
+  DCHECK_LE(num_bits, static_cast<int>(sizeof(T) * 8)) << "num_bits: " << num_bits;
 
   int bit_offset = bit_offset_;
   int byte_offset = byte_offset_;

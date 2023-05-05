@@ -49,7 +49,9 @@ namespace arrow {
 // Binary and String
 
 template <typename TYPE>
-class BaseBinaryBuilder : public ArrayBuilder {
+class BaseBinaryBuilder
+    : public ArrayBuilder,
+      public internal::ArrayBuilderExtraOps<BaseBinaryBuilder<TYPE>, std::string_view> {
  public:
   using TypeClass = TYPE;
   using offset_type = typename TypeClass::offset_type;
@@ -480,7 +482,7 @@ class ARROW_EXPORT FixedSizeBinaryBuilder : public ArrayBuilder {
     return Append(reinterpret_cast<const uint8_t*>(value));
   }
 
-  Status Append(const std::string_view& view) {
+  Status Append(std::string_view view) {
     ARROW_RETURN_NOT_OK(Reserve(1));
     UnsafeAppend(view);
     return Status::OK();
@@ -662,7 +664,7 @@ class ARROW_EXPORT ChunkedBinaryBuilder {
     return builder_->Append(value, length);
   }
 
-  Status Append(const std::string_view& value) {
+  Status Append(std::string_view value) {
     return Append(reinterpret_cast<const uint8_t*>(value.data()),
                   static_cast<int32_t>(value.size()));
   }
