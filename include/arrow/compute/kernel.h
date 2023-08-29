@@ -152,6 +152,12 @@ ARROW_EXPORT std::shared_ptr<TypeMatcher> RunEndInteger();
 ARROW_EXPORT std::shared_ptr<TypeMatcher> RunEndEncoded(
     std::shared_ptr<TypeMatcher> value_type_matcher);
 
+/// \brief Match run-end encoded types that use any valid run-end type and
+/// encode specific value types
+///
+/// @param[in] value_type_id a type id that the type of the values field should match
+ARROW_EXPORT std::shared_ptr<TypeMatcher> RunEndEncoded(Type::type value_type_id);
+
 /// \brief Match run-end encoded types that encode specific run-end and value types
 ///
 /// @param[in] run_end_type_matcher a matcher that is applied to the run_ends field
@@ -277,14 +283,16 @@ class ARROW_EXPORT OutputType {
   ///
   /// This function SHOULD _not_ be used to check for arity, that is to be
   /// performed one or more layers above.
-  using Resolver = Result<TypeHolder> (*)(KernelContext*, const std::vector<TypeHolder>&);
+  using Resolver =
+      std::function<Result<TypeHolder>(KernelContext*, const std::vector<TypeHolder>&)>;
 
   /// \brief Output an exact type
   OutputType(std::shared_ptr<DataType> type)  // NOLINT implicit construction
       : kind_(FIXED), type_(std::move(type)) {}
 
   /// \brief Output a computed type depending on actual input types
-  OutputType(Resolver resolver)  // NOLINT implicit construction
+  template <typename Fn>
+  OutputType(Fn resolver)  // NOLINT implicit construction
       : kind_(COMPUTED), resolver_(std::move(resolver)) {}
 
   OutputType(const OutputType& other) {
@@ -644,22 +652,22 @@ using ScalarAggregateFinalize = Status (*)(KernelContext*, Datum*);
 /// * finalize: produces the end result of the aggregation using the
 ///   KernelState in the KernelContext.
 struct ARROW_EXPORT ScalarAggregateKernel : public Kernel {
-  ScalarAggregateKernel() = default;
-
   ScalarAggregateKernel(std::shared_ptr<KernelSignature> sig, KernelInit init,
                         ScalarAggregateConsume consume, ScalarAggregateMerge merge,
-                        ScalarAggregateFinalize finalize)
+                        ScalarAggregateFinalize finalize, const bool ordered)
       : Kernel(std::move(sig), std::move(init)),
         consume(consume),
         merge(merge),
-        finalize(finalize) {}
+        finalize(finalize),
+        ordered(ordered) {}
 
   ScalarAggregateKernel(std::vector<InputType> in_types, OutputType out_type,
                         KernelInit init, ScalarAggregateConsume consume,
-                        ScalarAggregateMerge merge, ScalarAggregateFinalize finalize)
+                        ScalarAggregateMerge merge, ScalarAggregateFinalize finalize,
+                        const bool ordered)
       : ScalarAggregateKernel(
             KernelSignature::Make(std::move(in_types), std::move(out_type)),
-            std::move(init), consume, merge, finalize) {}
+            std::move(init), consume, merge, finalize, ordered) {}
 
   /// \brief Merge a vector of KernelStates into a single KernelState.
   /// The merged state will be returned and will be set on the KernelContext.
@@ -670,6 +678,14 @@ struct ARROW_EXPORT ScalarAggregateKernel : public Kernel {
   ScalarAggregateConsume consume;
   ScalarAggregateMerge merge;
   ScalarAggregateFinalize finalize;
+  /// \brief Whether this kernel requires ordering
+  /// Some aggregations, such as, "first", requires some kind of input order. The
+  /// order can be implicit, e.g., the order of the input data, or explicit, e.g.
+  /// the ordering specified with a window aggregation.
+  /// The caller of the aggregate kernel is responsible for passing data in some
+  /// defined order to the kernel. The flag here is a way for the kernel to tell
+  /// the caller that data passed to the kernel must be defined in some order.
+  bool ordered = false;
 };
 
 // ----------------------------------------------------------------------
@@ -699,25 +715,31 @@ struct ARROW_EXPORT HashAggregateKernel : public Kernel {
 
   HashAggregateKernel(std::shared_ptr<KernelSignature> sig, KernelInit init,
                       HashAggregateResize resize, HashAggregateConsume consume,
-                      HashAggregateMerge merge, HashAggregateFinalize finalize)
+                      HashAggregateMerge merge, HashAggregateFinalize finalize,
+                      const bool ordered)
       : Kernel(std::move(sig), std::move(init)),
         resize(resize),
         consume(consume),
         merge(merge),
-        finalize(finalize) {}
+        finalize(finalize),
+        ordered(ordered) {}
 
   HashAggregateKernel(std::vector<InputType> in_types, OutputType out_type,
                       KernelInit init, HashAggregateConsume consume,
                       HashAggregateResize resize, HashAggregateMerge merge,
-                      HashAggregateFinalize finalize)
+                      HashAggregateFinalize finalize, const bool ordered)
       : HashAggregateKernel(
             KernelSignature::Make(std::move(in_types), std::move(out_type)),
-            std::move(init), resize, consume, merge, finalize) {}
+            std::move(init), resize, consume, merge, finalize, ordered) {}
 
   HashAggregateResize resize;
   HashAggregateConsume consume;
   HashAggregateMerge merge;
   HashAggregateFinalize finalize;
+  /// @brief whether the summarizer requires ordering
+  /// This is similar to ScalarAggregateKernel. See ScalarAggregateKernel
+  /// for detailed doc of this variable.
+  bool ordered = false;
 };
 
 }  // namespace compute
